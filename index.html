@@ -1,0 +1,271 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Wallbox Event Timeline</title>
+    <link rel="stylesheet" href="style.css" />
+    <script>
+      if (localStorage.getItem('wallboxTheme') === 'dark') {
+        document.documentElement.dataset.theme = 'dark';
+      }
+    </script>
+    <script defer src="app.js"></script>
+  </head>
+  <body>
+    <div class="app-shell">
+      <header class="topbar">
+        <div>
+          <p class="eyebrow">Charger investigation</p>
+          <h1>Wallbox</h1>
+        </div>
+        <button type="button" id="themeSwitch" class="theme-switch" aria-pressed="false" aria-label="Switch to night mode"><span class="theme-knob" aria-hidden="true"></span></button>
+      </header>
+
+      <section class="panel query-panel">
+      <section class="control-panel">
+        <div class="field-group">
+          <label for="serialNumber">Serial number</label>
+          <div class="serial-field">
+            <input id="serialNumber" type="text" value="TACW2244723S0930" autocomplete="off" />
+            <div id="serialHistory" class="serial-history" hidden></div>
+          </div>
+        </div>
+
+        <div class="field-group token-status">
+          <label for="tokenLed">Token</label>
+          <div id="tokenLed" class="token-led" role="status" aria-label="TME token missing"></div>
+        </div>
+
+        <div class="search-action">
+          <button id="searchBtn" class="primary" type="button">Search</button>
+        </div>
+      </section>
+
+      <section class="filter-row date-window-row">
+        <div class="date-time-input-group small-field">
+          <label for="quickRange">Range</label>
+          <select id="quickRange">
+            <option value="">Custom</option>
+            <option value="900000">Past 15 min</option>
+            <option value="3600000">Past 1 hour</option>
+            <option value="14400000">Past 4 hours</option>
+            <option value="86400000">Past 1 day</option>
+            <option value="259200000">Past 3 days</option>
+            <option value="604800000" selected>Past week</option>
+            <option value="1209600000">Past 14 days</option>
+            <option value="2592000000">Past 30 days</option>
+          </select>
+        </div>
+        <div class="date-time-input-group">
+          <label>From</label>
+          <div class="date-time-pair">
+            <input id="startDate" type="date" value="2026-09-23" aria-label="Start date" />
+            <div class="time-field">
+              <button type="button" class="time-trigger" id="startTimeTrigger" aria-haspopup="dialog" aria-label="Start time">12:00:00 AM</button>
+              <input id="startTimeInput" type="hidden" value="00:00:00" />
+              <div class="time-popover" id="startTimePopover" hidden></div>
+            </div>
+          </div>
+        </div>
+
+        <div class="date-time-input-group">
+          <label>To</label>
+          <div class="date-time-pair">
+            <input id="endDate" type="date" value="2026-09-25" aria-label="End date" />
+            <div class="time-field">
+              <button type="button" class="time-trigger" id="endTimeTrigger" aria-haspopup="dialog" aria-label="End time">11:59:59 PM</button>
+              <input id="endTimeInput" type="hidden" value="23:59:59" />
+              <div class="time-popover" id="endTimePopover" hidden></div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <div class="range-bar">
+        <div class="overview-scale">
+          <span id="rangeStartLabel"></span>
+          <strong id="rangeDuration"></strong>
+          <span>Now</span>
+        </div>
+        <div id="rangeTrack" class="overview-track">
+          <div id="rangeTicks" class="range-ticks"></div>
+          <div id="rangeWindow" class="overview-window"><span class="overview-window-start"></span></div>
+          <div class="overview-cursor" hidden></div>
+          <div class="overview-brush" hidden><span class="overview-window-start"></span></div>
+          <div class="overview-tip" hidden></div>
+        </div>
+      </div>
+      </section>
+
+      <div id="statusBanner" class="status-banner info">Ready to query event logs.</div>
+
+      <section class="info-split">
+        <article class="panel info-card">
+          <div class="panel-header">
+            <h2>Charger info</h2>
+            <span id="chargerSummary" class="charger-lights">Search to load charger details</span>
+          </div>
+          <div id="chargerProfile" class="charger-profile">
+            <p class="empty-state">No charger record yet.</p>
+          </div>
+        </article>
+        <article class="panel info-card">
+          <div class="panel-header">
+            <h2>Charger access</h2>
+            <span id="accessSummary" class="charger-lights">Search to load access</span>
+          </div>
+          <div id="accessProfile" class="charger-profile">
+            <p class="empty-state">No access record yet.</p>
+          </div>
+        </article>
+        <article class="panel info-card">
+          <div class="panel-header">
+            <h2>Smart charging info</h2>
+            <span id="smartSummary" class="charger-lights">Search to load smart charging</span>
+          </div>
+          <div id="smartChargingProfile" class="charger-profile">
+            <p class="empty-state">No smart charging record yet.</p>
+          </div>
+        </article>
+        <article class="panel info-card">
+          <div class="panel-header">
+            <h2>Notable events</h2>
+          </div>
+          <div id="notableEvents" class="charger-profile">
+            <p class="empty-state">Search to load notable events.</p>
+          </div>
+        </article>
+      </section>
+
+      <section class="panel">
+        <div class="panel-header">
+          <h2>Charging sessions</h2>
+          <span class="panel-hint">Scroll the bar to zoom. Hover a circle for the session.</span>
+        </div>
+        <div id="sessionStrip" class="session-strip"></div>
+        <div class="table-wrap session-scroll">
+            <table class="session-table">
+            <thead>
+              <tr>
+                <th>Session</th>
+                <th>Status</th>
+                <th>Type</th>
+                <th>Auth</th>
+                <th>Start</th>
+                <th>Stop</th>
+                <th>Duration</th>
+                <th>Energy</th>
+                <th>SoC</th>
+                <th>Mode</th>
+              </tr>
+            </thead>
+            <tbody id="sessionTableBody">
+              <tr><td colspan="10" class="empty-row">Search to load charging sessions.</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </section>
+
+      <section id="sessionAnalysis" class="panel" hidden>
+        <div class="panel-header">
+          <h2 id="sessionAnalysisTitle">Session analysis</h2>
+          <button id="sessionAnalysisClose" type="button">Close</button>
+        </div>
+        <div id="sessionAnalysisBody"></div>
+      </section>
+
+      <section class="panel timeline-panel" id="connectorPanel">
+        <div class="panel-header">
+          <h2>Connector status</h2>
+          <div class="connector-tabs" role="tablist">
+            <button type="button" class="connector-tab" role="tab" id="connectorTab0" data-connector="0" aria-selected="false" aria-controls="connectorPane0">Connector 0</button>
+            <button type="button" class="connector-tab active" role="tab" id="connectorTab1" data-connector="1" aria-selected="true" aria-controls="connectorPane1">Connector 1</button>
+          </div>
+        </div>
+        <div id="connectorPane0" class="connector-pane" role="tabpanel" aria-labelledby="connectorTab0" hidden>
+          <p class="panel-hint">Faulted, Available, Unavailable, Disconnected, or Activation Pending. Each bar holds until the next status.</p>
+          <div class="timeline-tools">
+            <button id="connector0Fit" type="button">Show full window</button>
+            <span class="panel-hint">Drag the top bar to choose a time. Hover a bar for that status.</span>
+          </div>
+          <div id="connector0Legend" class="event-legend"></div>
+          <div id="connector0Overview" class="timeline-overview"></div>
+          <div id="connector0Timeline"></div>
+        </div>
+        <div id="connectorPane1" class="connector-pane" role="tabpanel" aria-labelledby="connectorTab1">
+          <p class="panel-hint">Each bar holds the last connector 1 status until the next one arrives.</p>
+          <div class="timeline-tools">
+            <button id="connectorFit" type="button">Show full window</button>
+            <span class="panel-hint">Drag the top bar to choose a time. Hover a bar for that status.</span>
+          </div>
+          <div id="connectorLegend" class="event-legend"></div>
+          <div id="connectorOverview" class="timeline-overview"></div>
+          <div id="connectorTimeline"></div>
+        </div>
+      </section>
+
+      <section class="panel events-section">
+        <div class="panel-header">
+          <h2>Events</h2>
+          <span id="timelineWindow" class="panel-hint">Full window</span>
+        </div>
+        <div id="eventLegend" class="event-legend" aria-label="Event type legend"></div>
+        <section class="filter-row">
+          <div class="type-filter">
+            <span class="filter-label">Event type(s)</span>
+            <div id="typeFilter" class="multi-select">
+              <button type="button" id="typeFilterTrigger" class="multi-trigger" aria-haspopup="listbox">All types</button>
+              <div id="typeFilterPanel" class="multi-panel" hidden></div>
+            </div>
+          </div>
+          <label>
+            Search event name
+            <input id="eventNameSearch" type="text" placeholder="Type 'Reboot', 'StatusNotification'..." />
+          </label>
+        </section>
+        <div class="timeline-tools">
+          <button id="timelineFit" type="button">Show full window</button>
+          <span class="panel-hint">Drag the top bar to choose a time. Hover a dot for every event at that moment.</span>
+        </div>
+        <div id="overviewLegend" class="event-legend"></div>
+        <div id="timelineOverview" class="timeline-overview"></div>
+        <div id="timeline"></div>
+        <div id="eventHover" class="event-hover" hidden></div>
+        <section class="details-grid">
+          <div>
+            <div class="panel-header">
+              <h2>Events</h2>
+            </div>
+            <div class="table-wrap">
+              <table class="event-table">
+                <colgroup>
+                  <col style="width: 38%" />
+                  <col style="width: 34%" />
+                  <col style="width: 28%" />
+                </colgroup>
+                <thead>
+                  <tr>
+                    <th>Time</th>
+                    <th>Type</th>
+                    <th>Event</th>
+                  </tr>
+                </thead>
+                <tbody id="eventTableBody"></tbody>
+              </table>
+            </div>
+          </div>
+          <div>
+            <div class="panel-header">
+              <h2>Selected event</h2>
+            </div>
+            <pre id="detailPane">Select an event from the timeline or table to inspect its payload.</pre>
+          </div>
+        </section>
+      </section>
+
+      <p class="designer-note">Designed by Sagiad Madadian | 2026</p>
+
+    </div>
+  </body>
+</html>
