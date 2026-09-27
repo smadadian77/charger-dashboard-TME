@@ -36,7 +36,7 @@ button, input, select, textarea {
 .app-shell {
   max-width: 1460px;
   margin: 0 auto;
-  padding: 20px 20px 40px;
+  padding: 48px 20px 40px;
 }
 
 .topbar {
@@ -358,6 +358,38 @@ html[data-theme="dark"] .theme-knob {
 .status-light.tone-bad { color: #ef4444; }
 .status-light.tone-warn { color: #f59e0b; }
 
+.limit-tip {
+  position: relative;
+  display: inline;
+  cursor: help;
+}
+
+.limit-tip-text {
+  display: none;
+  position: absolute;
+  left: 0;
+  top: calc(100% + 6px);
+  z-index: 5;
+  width: max-content;
+  max-width: 320px;
+  padding: 8px 10px;
+  border-radius: 8px;
+  background: #111827;
+  color: #fff;
+  font-size: 12px;
+  font-style: normal;
+  font-weight: 400;
+  white-space: pre-wrap;
+  line-height: 1.45;
+  text-align: left;
+  box-shadow: 0 8px 24px rgba(15, 23, 42, 0.25);
+}
+
+.limit-tip:hover .limit-tip-text,
+.limit-tip:focus .limit-tip-text {
+  display: block;
+}
+
 .charger-profile {
   padding: 0 16px 16px;
 }
@@ -579,21 +611,21 @@ html[data-theme="dark"] .theme-knob {
 
 
 .eyebrow {
-  margin: 0 0 2px;
+  margin: 16px 0 0;
   letter-spacing: 0.04em;
   text-transform: none;
-  color: var(--muted);
+  color: #2b3a5e;
   font-size: 12px;
-  font-weight: 400;
+  font-weight: 200;
 }
 
 h1 {
   margin: 0;
-  font-size: 1.25rem;
-  line-height: 1.2;
+  font-size: 1.6rem;
+  line-height: 1.15;
   letter-spacing: 0;
-  font-weight: 600;
-  color: #111827;
+  font-weight: 900;
+  color: #2b3a5e;
 }
 
 .control-panel,
@@ -607,7 +639,7 @@ h1 {
 
 .control-panel {
   display: grid;
-  grid-template-columns: minmax(260px, 2fr) 160px auto 150px;
+  grid-template-columns: minmax(260px, 2fr) 160px auto;
   gap: 16px;
   padding: 18px;
   align-items: end;
@@ -615,6 +647,29 @@ h1 {
 
 .serial-field {
   position: relative;
+}
+
+.serial-field .serial-input {
+  width: 100%;
+  min-width: 360px;
+  padding: 16px 18px;
+  font-size: 1.05rem;
+  font-weight: 600;
+  color: #ffffff;
+  background: #2b3a5e;
+  border: 1px solid #2b3a5e;
+  border-radius: 10px;
+  outline: none;
+  transition: border-color 0.15s ease, box-shadow 0.15s ease;
+}
+
+.serial-field .serial-input::placeholder {
+  color: rgba(255, 255, 255, 0.6);
+}
+
+.serial-field .serial-input:focus {
+  border-color: #1e3a8a;
+  box-shadow: 0 0 0 3px rgba(30, 58, 138, 0.25);
 }
 
 .serial-history {
@@ -1873,14 +1928,6 @@ tr.selected-row {
   .filter-row {
     grid-template-columns: 1fr;
     display: grid;
-  }
-
-  .search-action {
-    justify-content: stretch;
-  }
-
-  .search-action button {
-    width: 100%;
   }
 }
 

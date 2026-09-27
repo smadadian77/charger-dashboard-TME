@@ -3,7 +3,7 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>Wallbox Event Timeline</title>
+    <title>CHARGER DASHBOARD</title>
     <link rel="stylesheet" href="style.css" />
     <script>
       if (localStorage.getItem('wallboxTheme') === 'dark') {
@@ -16,8 +16,8 @@
     <div class="app-shell">
       <header class="topbar">
         <div>
-          <p class="eyebrow">Charger investigation</p>
-          <h1>Wallbox</h1>
+          <p class="eyebrow">TME EVBE Customer Support</p>
+          <h1>CHARGER DASHBOARD</h1>
         </div>
         <button type="button" id="themeSwitch" class="theme-switch" aria-pressed="false" aria-label="Switch to night mode"><span class="theme-knob" aria-hidden="true"></span></button>
       </header>
@@ -27,7 +27,7 @@
         <div class="field-group">
           <label for="serialNumber">Serial number</label>
           <div class="serial-field">
-            <input id="serialNumber" type="text" value="TACW2244723S0930" autocomplete="off" />
+            <input id="serialNumber" class="serial-input" type="text" value="TACW2244723S0930" autocomplete="off" />
             <div id="serialHistory" class="serial-history" hidden></div>
           </div>
         </div>
@@ -35,10 +35,6 @@
         <div class="field-group token-status">
           <label for="tokenLed">Token</label>
           <div id="tokenLed" class="token-led" role="status" aria-label="TME token missing"></div>
-        </div>
-
-        <div class="search-action">
-          <button id="searchBtn" class="primary" type="button">Search</button>
         </div>
       </section>
 

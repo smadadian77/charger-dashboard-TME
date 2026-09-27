@@ -13,6 +13,7 @@ from urllib.request import Request, urlopen
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 REMOTE_BASE_URL = "https://tme-ev-chargingplatform.toyota-europe.com/v2/log-management/events"
 WALLBOX_URL = "https://tme-ev-chargingplatform.toyota-europe.com/v2/wallbox-management/dashboard/wallboxes"
+CHANNEL_INFO_URL = "https://tme-ev-chargingplatform.toyota-europe.com/v2/wallbox-management/wallboxes/{serial}/channel-info"
 SESSIONS_URL = "https://tme-ev-chargingplatform.toyota-europe.com/v2/charging-session-management/wallboxes/charging-session"
 ACCESS_URL = "https://tme-ev-chargingplatform.toyota-europe.com/v1/accesses"
 SMART_CHARGING_URL = "https://tme-ev-chargingplatform.toyota-europe.com/v1/smart-charging-management/wallboxes"
@@ -245,6 +246,10 @@ class AppHandler(BaseHTTPRequestHandler):
             self._proxy_smart_charging()
             return
 
+        if parsed.path == "/api/channel-info":
+            self._proxy_channel_info()
+            return
+
         if parsed.path != "/api/events":
             self.send_error(404, "Not found")
             return
@@ -460,6 +465,47 @@ class AppHandler(BaseHTTPRequestHandler):
             "tariff": (tariff_payload or {}).get("data") or None,
             "smartChargingError": smart_error,
             "tariffError": tariff_error,
+        })
+
+    def _proxy_channel_info(self):
+        try:
+            payload = self._read_json_body()
+        except json.JSONDecodeError:
+            self._send_json({"ok": False, "message": "Request body is not valid JSON."}, status=400)
+            return
+
+        serial_number = str(payload.get("serialNumber", "")).strip()
+        token = str(payload.get("token") or "").strip()
+        if token.lower().startswith("bearer "):
+            token = token[7:].strip()
+        if not serial_number or not token:
+            self._send_json({"ok": False, "message": "Serial number and token are required."}, status=400)
+            return
+
+        try:
+            remote_payload = self._tme_get(
+                CHANNEL_INFO_URL.format(serial=quote(serial_number)), token,
+            )
+        except Exception as exc:
+            message = str(exc)
+            if hasattr(exc, "read"):
+                try:
+                    message = exc.read().decode("utf-8", errors="replace")
+                except Exception:
+                    pass
+            self._send_json({"ok": False, "message": "Channel info lookup failed.", "details": message}, status=502)
+            return
+
+        data = remote_payload.get("data") or {}
+        channel_data = str(data.get("channelData") or "")
+        tokens = [item.strip() for item in channel_data.split(",") if item.strip()]
+        active_limit = tokens[-1] if tokens else ""
+        self._send_json({
+            "ok": True,
+            "channelInfo": data,
+            "payload": remote_payload,
+            "activeChargingLimit": active_limit,
+            "channelData": channel_data,
         })
 
     def _proxy_access(self):

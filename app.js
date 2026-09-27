@@ -21,6 +21,8 @@ const state = {
   access: null,
   smartCharging: null,
   tariff: null,
+  channelInfo: null,
+  activeChargingLimit: '',
   chargingSessions: [],
   timeline: null,
   connectorTimeline: null,
@@ -2427,6 +2429,26 @@ async function fetchWallbox(serialNumber, token) {
   }
 }
 
+async function fetchChannelInfo(serialNumber, token) {
+  try {
+    const response = await fetch('/api/channel-info', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ serialNumber, token }),
+    });
+    const result = await response.json();
+    if (!response.ok || !result.ok) {
+      return { channelInfo: null, activeChargingLimit: '' };
+    }
+    return {
+      channelInfo: result.channelInfo || null,
+      activeChargingLimit: String(result.activeChargingLimit || ''),
+    };
+  } catch (error) {
+    return { channelInfo: null, activeChargingLimit: '' };
+  }
+}
+
 async function fetchEventPage(serialNumber, token, startTime, endTime, page) {
   const response = await fetch('/api/events', {
     method: 'POST',
@@ -2530,6 +2552,9 @@ async function fetchEvents() {
 
   try {
     state.wallbox = await fetchWallbox(serialNumber, token);
+    const channelInfo = await fetchChannelInfo(serialNumber, token);
+    state.channelInfo = channelInfo.channelInfo;
+    state.activeChargingLimit = channelInfo.activeChargingLimit;
     state.access = await fetchAccess(serialNumber, token);
     state.smartCharging = await fetchSmartCharging(serialNumber, token);
     renderAccessProfile();
@@ -2578,6 +2603,11 @@ function displayValue(value) {
     return JSON.stringify(value);
   }
   return String(value);
+}
+
+function activeLimitTooltip(limit) {
+  const ceiling = escapeHtml(limit || '—');
+  return `Active Limit Calculation\nThe charger evaluates all inputs and enforces the lowest value as a safety ceiling.`;
 }
 
 function formatPowerWatts(value) {
@@ -2646,6 +2676,9 @@ function chargerFacts(wallbox) {
     ['Access', [
       ['Owner PIN', wallbox.ownerPin, '', true],
     ]],
+    state.activeChargingLimit ? ['Channel info', [
+      ['Active charging limit', state.activeChargingLimit, '', false, false, activeLimitTooltip(state.activeChargingLimit)],
+    ]] : [],
   ];
 }
 
@@ -2681,15 +2714,20 @@ function renderChargerProfile() {
     `).join('')}
   `;
   profile.innerHTML = `
-    ${chargerFacts(wallbox).map(([title, rows]) => `
+    ${chargerFacts(wallbox).filter(([title, rows]) => rows.length).map(([title, rows]) => `
       <section class="charger-group">
         <h3>${escapeHtml(title)}</h3>
         <dl>
-          ${(rows.length ? rows : [['None', '—']]).map(([label, value, tone, copyable, place]) => `
+          ${(rows.length ? rows : [['None', '—']]).map(([label, value, tone, copyable, place, tooltip]) => `
             <div class="${place || ''}">
               <dt>${escapeHtml(label)}</dt>
               <dd>
-                ${tone ? `<span class="status-pill tone-${tone}">${escapeHtml(displayValue(value))}</span>` : escapeHtml(displayValue(value))}
+                ${tooltip ? `
+                  <span class="limit-tip" tabindex="0">
+                    <span class="limit-tip-value">${tone ? `<span class="status-pill tone-${tone}">${escapeHtml(displayValue(value))}</span>` : escapeHtml(displayValue(value))}
+                    <span class="limit-tip-text">${tooltip}</span>
+                  </span>
+                ` : (tone ? `<span class="status-pill tone-${tone}">${escapeHtml(displayValue(value))}</span>` : escapeHtml(displayValue(value)))}
                 ${copyable ? `<button type="button" class="copy-pin" data-pin="${escapeHtml(displayValue(value))}">Copy</button>` : ''}
               </dd>
             </div>
@@ -3312,6 +3350,13 @@ document.addEventListener('DOMContentLoaded', async () => {
   const serialInput = document.getElementById('serialNumber');
   serialInput.addEventListener('focus', renderSerialHistory);
   serialInput.addEventListener('input', renderSerialHistory);
+  serialInput.addEventListener('keydown', (event) => {
+    if (event.key === 'Enter') {
+      event.preventDefault();
+      closePopovers();
+      fetchEvents();
+    }
+  });
   serialInput.addEventListener('blur', () => {
     window.setTimeout(() => {
       document.getElementById('serialHistory').hidden = true;
@@ -3320,7 +3365,6 @@ document.addEventListener('DOMContentLoaded', async () => {
   document.querySelectorAll('.connector-tab').forEach((button) => {
     button.addEventListener('click', () => showConnectorTab(Number(button.dataset.connector)));
   });
-  document.getElementById('searchBtn').addEventListener('click', fetchEvents);
   document.getElementById('sessionAnalysisClose').addEventListener('click', () => {
     document.getElementById('sessionAnalysis').hidden = true;
   });
