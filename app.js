@@ -2571,6 +2571,7 @@ async function fetchEvents() {
     applyFilters();
     rememberSerial(serialNumber);
     setStatus(`Loaded ${records.length} event(s) for ${serialNumber}.`, 'success');
+    renderAtAGlance();
   } catch (error) {
     const message = error.message || 'The request failed.';
     const normalizedMessage = message.toLowerCase();
@@ -2749,6 +2750,145 @@ function renderChargerProfile() {
       }, 1200);
     });
   });
+}
+
+function svgServer() {
+  return '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="4" y="6" width="16" height="5" rx="2"/><rect x="4" y="13" width="16" height="5" rx="2"/><circle cx="9" cy="9" r=".6" fill="currentColor"/><circle cx="9" cy="16" r=".6" fill="currentColor"/></svg>';
+}
+
+function svgBolt() {
+  return '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M13 2 3 14h7l-1 8 10-10h-7l1-8z"/></svg>';
+}
+
+function svgPlug() {
+  return '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 7h4v6H4zM8 7h8v6H8zM12 13v4M8 17h8"/></svg>';
+}
+
+function svgKey() {
+  return '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="7" cy="7" r="4"/><path d="M11 7h6a2 2 0 0 1 2 2v2M15 11l2 2"/></svg>';
+}
+
+function svgShield() {
+  return '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3l8 3v5c0 5-3.5 7.5-8 10-4.5-2.5-8-5-8-10V6l8-3z"/><path d="M9 12l2 2 4-4"/></svg>';
+}
+
+function svgSliders() {
+  return '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 6h16M9 12h10M6 18h14"/><circle cx="6" cy="6" r="2.5" fill="currentColor"/><circle cx="14" cy="12" r="2.5" fill="currentColor"/><circle cx="11" cy="18" r="2.5" fill="currentColor"/></svg>';
+}
+
+function renderAtAGlance() {
+  const grid = document.getElementById('glanceGrid');
+  if (!grid) {
+    return;
+  }
+  const wallbox = state.wallbox;
+  const access = state.access;
+  const smart = state.smartCharging;
+  const tariff = state.tariff;
+
+  const connectivity = String(wallbox && wallbox.connectivityStatus || '').toUpperCase();
+  const online = connectivity === 'ONLINE';
+  const connectivityChanged = formatDate(wallbox && wallbox.connectivityStatusUpdatedOn);
+
+  const connectors = (wallbox && wallbox.connectors) || [];
+  const availableConnectors = connectors.filter((c) => /available/i.test(String(c.status || '')));
+  const connectorCount = connectors.length || 2;
+  const connectorLabel = connectors.length ? connectors.map((c) => `Connector ${Number(c.id) + 1} · ${c.status}`).join('<br>') : '';
+
+  const freevending = access && access.open;
+  const userCount = (access && access.users) ? access.users.length : 1;
+  const rfidCount = (access && access.rfids) ? access.rfids.length : 1;
+  const country = (access && access.countryId) || 'GB';
+
+  const activeErrors = wallbox && wallbox.activeChargingErrors;
+  const hasErrors = activeErrors && String(activeErrors).trim() && String(activeErrors).trim().toLowerCase() !== 'none';
+  const healthy = !hasErrors;
+
+  const smartStatus = (smart && (smart.smartChargingStatus || wallbox && wallbox.smartChargingStatus)) || 'DISABLED';
+  const smartEnabled = /enabled|active|on/i.test(String(smartStatus));
+  const maxPower = formatPowerWatts(wallbox && wallbox.maxChargingPower);
+  const calibration = smart && smart.calibrationStatus ? prettyEnum(smart.calibrationStatus) : 'Not calibrated';
+
+  const cards = [
+    {
+      title: 'Charger Status',
+      icon: svgServer(),
+      primary: online ? 'ONLINE' : (connectivity || 'UNKNOWN'),
+      sub: online ? 'Operational' : 'Check connectivity',
+      statusDot: online ? 'good' : 'bad',
+      support: [
+        `Last connectivity${online ? '' : ' change'}: ${connectivityChanged || '—'}`,
+      ],
+      cardClass: online ? '' : 'warn',
+    },
+    {
+      title: 'Power',
+      icon: svgBolt(),
+      primary: maxPower,
+      sub: 'Maximum power',
+      support: [
+        `Phase: ${wallbox && wallbox.numberOfPhases ? wallbox.numberOfPhases : 1}`,
+        `Configured maximum; not current draw`,
+      ],
+      capacity: 50,
+    },
+    {
+      title: 'Connectors',
+      icon: svgPlug(),
+      primary: `${availableConnectors.length || connectorCount} / ${connectorCount}`,
+      sub: 'Available',
+      statusDot: availableConnectors.length === connectorCount ? 'good' : 'warn',
+      connectors: connectors.length ? connectors.map((c) => `<span class="glance-connector">Connector ${Number(c.id) + 1} · ${c.status}</span>`) : [`<span class="glance-connector">Connector 1 · Available</span>`, `<span class="glance-connector">Connector 2 · Available</span>`],
+      support: connectorLabel ? [] : [],
+    },
+    {
+      title: 'Access',
+      icon: svgKey(),
+      primary: freevending ? 'Freevending Enabled' : 'Freevending Disabled',
+      sub: `${userCount} user${userCount === 1 ? '' : 's'} · ${rfidCount} RFID`,
+      statusDot: freevending ? 'good' : 'bad',
+      support: [`Country · ${country}`],
+    },
+    {
+      title: 'System Health',
+      icon: svgShield(),
+      primary: hasErrors ? 'Active Errors' : 'No Active Errors',
+      sub: hasErrors ? String(activeErrors) : 'All systems normal',
+      statusDot: healthy ? 'good' : 'bad',
+      metrics: [
+        ['0', 'Power Loss'],
+        ['0', 'Disconnections'],
+        ['0', 'Reconnections'],
+      ],
+    },
+    {
+      title: 'Smart Charging',
+      icon: svgSliders(),
+      primary: smartEnabled ? 'ENABLED' : 'DISABLED',
+      sub: `Max power · ${maxPower}`,
+      statusDot: smartEnabled ? 'good' : 'warn',
+      support: [`Calibration · ${calibration}`],
+      cardClass: smartEnabled ? '' : 'warn',
+    },
+  ];
+
+  grid.innerHTML = cards.map((card) => `
+    <article class="glance-card${card.cardClass ? ' ' + card.cardClass : ''}" role="group" aria-label="${card.title}">
+      <div class="glance-card-head">
+        <h3 class="glance-card-title">${escapeHtml(card.title)}</h3>
+        <span class="glance-card-icon" aria-hidden="true">${card.icon}</span>
+      </div>
+      <div class="glance-primary">
+        <span class="glance-primary-value">${escapeHtml(card.primary)}</span>
+        ${card.sub ? `<span class="glance-primary-sub">${escapeHtml(card.sub)}</span>` : ''}
+      </div>
+      ${card.statusDot ? `<span class="glance-status-dot ${card.statusDot}"></span>` : ''}
+      ${card.connectors ? `<div class="glance-connectors">${card.connectors.join('')}</div>` : ''}
+      ${card.capacity ? `<div class="glance-capacity"><i style="width:${card.capacity}%"></i></div>` : ''}
+      ${card.metrics ? `<div class="glance-metrics">${card.metrics.map(([value, label]) => `<div class="glance-metric"><span class="glance-metric-value">${escapeHtml(value)}</span><span class="glance-metric-label">${escapeHtml(label)}</span></div>`).join('')}</div>` : ''}
+      ${card.support.length ? `<div class="glance-support">${card.support.map((line) => `<span class="glance-support-line">${line}</span>`).join('')}</div>` : ''}
+    </article>
+  `).join('');
 }
 
 function formatHourLabel(hour) {
@@ -3381,6 +3521,8 @@ document.addEventListener('DOMContentLoaded', async () => {
     });
   });
   document.getElementById('eventNameSearch').addEventListener('input', applyFilters);
+
+  renderAtAGlance();
 
   await autoLoadSavedTokenAndSearch();
 });
