@@ -1,0 +1,1369 @@
+﻿    <div class="app-shell">
+            <header class="topbar">
+        <!-- GROUP 1: TOP ROW - Toyota Branding, Scope, Titles & Circular Back Button -->
+        <div class="topbar-branding">
+          <a href="#" class="topbar-toyota-brand" id="topbarToyotaBrand" title="Toyota Motor Europe - Fleet Overview">
+            <div class="toyota-brand-logo" aria-hidden="true">
+              <svg viewBox="74.7 74.7 224 224" class="toyota-svg-emblem">
+                <path d="M224,137.8c-10.4-3.3-23.3-5.3-37.4-5.3c-14,0-27,2-37.4,5.3c-27.6,8.9-46.6,27.3-46.6,48.7 c0,30,37.6,54.3,84,54.3c46.4,0,84-24.3,84-54.3C270.7,165.2,251.7,146.7,224,137.8 M186.7,217.5c-6.9,0-12.6-13.6-12.9-30.7c4.2,0.4,8.5,0.6,12.9,0.6c4.4,0,8.7-0.2,12.9-0.6C199.2,203.9,193.6,217.5,186.7,217.5 M174.6,173.4c1.9-12,6.6-20.5,12-20.5c5.5,0,10.1,8.5,12,20.5c-3.8,0.3-7.9,0.5-12,0.5C182.5,173.9,178.5,173.7,174.6,173.4 M206.1,172.5c-2.8-18.8-10.4-32.4-19.4-32.4c-9,0-16.6,13.5-19.4,32.4c-17.1-2.7-29-8.7-29-15.8c0-9.5,21.7-17.2,48.4-17.2c26.7,0,48.4,7.7,48.4,17.2 C235,163.7,223.1,169.8,206.1,172.5 M114.9,184.5c0-9.2,3.5-17.8,9.7-25.2c-0.1,0.5-0.1,1-0.1,1.6c0,11.6,17.4,21.4,41.6,25 c0,0.9,0,1.8,0,2.6c0,21.5,6,39.7,14.2,46C143.7,232.3,114.9,210.7,114.9,184.5 M193,234.5c8.2-6.3,14.2-24.5,14.2-46c0-0.9,0-1.8,0-2.6c24.2-3.6,41.6-13.5,41.6-25c0-0.5,0-1-0.1-1.6c6.2,7.4,9.7,16,9.7,25.2C258.4,210.7,229.6,232.3,193,234.5"/>
+              </svg>
+            </div>
+            <div class="toyota-brand-text">
+              <span class="toyota-wordmark">TOYOTA</span>
+              <span class="toyota-submark">Motor Europe</span>
+            </div>
+          </a>
+          <div class="topbar-brand-divider" aria-hidden="true"></div>
+          <div class="topbar-titles-wrap">
+            <p class="eyebrow" id="topbarEyebrow">EV Fleet Operations</p>
+            <div class="topbar-title-row">
+              <h1 id="topbarTitle">Charging stations</h1>
+            </div>
+          </div>
+          <div class="topbar-brand-right">
+            <div id="topbarChargerStatusCluster" class="topbar-charger-status-cluster" hidden>
+              <span id="topbarConnectivityPill" class="topbar-status-minimal-pill is-online" title="Charger Connectivity Status">
+                <span class="status-dot"></span>
+                <span class="status-text" id="topbarConnectivityText">Online</span>
+              </span>
+              <span id="topbarConnectorPill" class="topbar-status-minimal-pill tone-available" title="Connector 1 Status">
+                <span class="status-dot" id="topbarConnectorDot"></span>
+                <span class="status-text" id="topbarConnectorText">Connector 1: Available</span>
+              </span>
+            </div>
+            <span id="activeChargerBadge" class="active-charger-badge" hidden></span>
+            <button type="button" id="backToFleetBtn" class="back-to-fleet-btn" hidden title="Back to Fleet Overview" aria-label="Back to Fleet Overview">
+              <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="15 18 9 12 15 6"/></svg>
+            </button>
+          </div>
+        </div>
+
+        <!-- GROUP 2: BOTTOM ROW - Actions, Telemetry, Tools & Theme -->
+        <div class="topbar-actions">
+          <div class="topbar-telemetry-cluster">
+            <div class="env-switcher" id="envSwitcher" role="group" aria-label="Target Environment">
+              <button type="button" class="env-pill active" data-env="prod" title="Production (33k+ chargers)">
+                <span class="env-dot env-dot-prod"></span>
+                <span class="env-name">PROD</span>
+              </button>
+              <button type="button" class="env-pill" data-env="acc" title="Acceptance (47k+ chargers)">
+                <span class="env-dot env-dot-acc"></span>
+                <span class="env-name">ACC</span>
+              </button>
+              <button type="button" class="env-pill" data-env="prev" title="Pre-Validation (119k+ chargers)">
+                <span class="env-dot env-dot-prev"></span>
+                <span class="env-name">PREV</span>
+              </button>
+            </div>
+            <div class="live-telemetry-badge integrated-telemetry-pill" id="liveTelemetryBadge" title="Live telemetry, sync provenance and session authentication">
+              <span class="live-beacon" aria-hidden="true"></span>
+              <span class="live-text" id="liveHeaderEnvBadge">PROD LIVE</span>
+              <span class="live-clock" id="liveHeaderClock">--:--:--</span>
+              <span class="telemetry-pill-divider" aria-hidden="true"></span>
+              <div class="token-status-pill inline-token-segment" id="globalTokenPill" title="TME session authentication status">
+                <span class="token-state-dot" id="globalTokenDot"></span>
+                <span id="globalTokenText">Token: Ready</span>
+                <button type="button" id="globalTokenRefresh" class="token-refresh-btn" title="Refresh session token" aria-label="Refresh session token">
+                  <svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2"><path d="M21.5 2v6h-6M21.34 15.57a10 10 0 1 1-.57-8.38l5.67-5.67"/></svg>
+                </button>
+              </div>
+              <span class="telemetry-pill-divider" aria-hidden="true"></span>
+              <span class="live-sync-indicator" id="liveDataSyncStatus">Synced Just Now</span>
+            </div>
+          </div>
+          <div class="topbar-tools-cluster">
+            <button type="button" class="topbar-ops-pill" id="topbarOpsBtn" title="System Operations & Analytics View">
+              <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2.2"><path d="M18 20V10M12 20V4M6 20v-6"/></svg>
+              <span>OPS Analytics</span>
+            </button>
+            <div class="topbar-nav-item has-popover" id="topbarSupportNavItem">
+              <button type="button" class="topbar-nav-link" id="topbarSupportLink" aria-haspopup="dialog" aria-expanded="false" title="Customer Support & Fleet Assistance">
+                <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2">
+                  <circle cx="12" cy="12" r="10"/>
+                  <path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3"/>
+                  <line x1="12" y1="17" x2="12.01" y2="17"/>
+                </svg>
+                <span>Customer Support</span>
+                <svg class="nav-chevron" viewBox="0 0 24 24" width="10" height="10" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="6 9 12 15 18 9"/></svg>
+              </button>
+              <div class="topbar-popover" role="tooltip" id="customerSupportPopover" aria-label="Customer Support Details">
+                <div class="topbar-popover-header">
+                  <div class="popover-icon-box" aria-hidden="true">
+                    <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 11.5a8.38 8.38 0 0 1-.9 3.8 8.5 8.5 0 0 1-7.6 4.7 8.38 8.38 0 0 1-3.8-.9L3 21l1.9-5.7a8.38 8.38 0 0 1-.9-3.8 8.5 8.5 0 0 1 4.7-7.6 8.38 8.38 0 0 1 3.8-.9h.5a8.48 8.48 0 0 1 8 8v.5z"/></svg>
+                  </div>
+                  <div class="popover-header-text">
+                    <strong>TME EVBE Customer Support</strong>
+                    <span class="popover-sub">Fleet Escalation & Diagnostics</span>
+                  </div>
+                  <span class="support-status-chip nominal">SLA Active</span>
+                </div>
+                <div class="topbar-popover-body">
+                  <p>Support desk and telemetry assistance for European charging operations, wallbox commissioning, and Tier-2 diagnostic overrides.</p>
+                  <div class="popover-contact-grid">
+                    <div class="contact-item">
+                      <span class="contact-label">Hotline:</span>
+                      <span class="contact-val">+32 2 745 2111 (TME HQ)</span>
+                    </div>
+                    <div class="contact-item">
+                      <span class="contact-label">Portal:</span>
+                      <span class="contact-val">ev-support.toyota-europe.com</span>
+                    </div>
+                    <div class="contact-item">
+                      <span class="contact-label">Escalation:</span>
+                      <span class="contact-val">24/7 Operations Duty</span>
+                    </div>
+                    <div class="contact-item">
+                      <span class="contact-label">Scope:</span>
+                      <span class="contact-val">28 EU Operating Markets</span>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
+            <div id="themeSwitch" class="theme-switch" role="group" aria-label="Color theme">
+              <button type="button" class="theme-option" data-theme="light" aria-label="Light theme" aria-pressed="true">
+                <svg class="theme-icon" viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="5"/><line x1="12" y1="1" x2="12" y2="3"/><line x1="12" y1="21" x2="12" y2="23"/><line x1="4.22" y1="4.22" x2="5.64" y2="5.64"/><line x1="18.36" y1="18.36" x2="19.78" y2="19.78"/><line x1="1" y1="12" x2="3" y2="12"/><line x1="21" y1="12" x2="23" y2="12"/><line x1="4.22" y1="19.78" x2="5.64" y2="18.36"/><line x1="18.36" y1="5.64" x2="19.78" y2="4.22"/></svg>
+                <span>Light</span>
+              </button>
+              <button type="button" class="theme-option" data-theme="dark" aria-label="Dark theme" aria-pressed="false">
+                <svg class="theme-icon" viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/></svg>
+                <span>Dark</span>
+              </button>
+            </div>
+          </div>
+        </div>
+      </header>
+
+      <!-- VIEW 1: CHARGING STATIONS FLEET VIEW (DEFAULT MAIN LANDING VIEW) -->
+      <main id="fleetView" class="fleet-view">
+        <!-- Upper ~30%: Fleet Intelligence & Operations Hero -->
+        <section class="fleet-hero-panel">
+          <div class="fleet-hero-top">
+            <div class="fleet-hero-intro">
+              <span class="fleet-badge-accent">
+                <svg class="inline-toyota-emblem" viewBox="74.7 74.7 224 224" width="13" height="13" fill="currentColor" aria-hidden="true">
+                  <path d="M224,137.8c-10.4-3.3-23.3-5.3-37.4-5.3c-14,0-27,2-37.4,5.3c-27.6,8.9-46.6,27.3-46.6,48.7 c0,30,37.6,54.3,84,54.3c46.4,0,84-24.3,84-54.3C270.7,165.2,251.7,146.7,224,137.8 M186.7,217.5c-6.9,0-12.6-13.6-12.9-30.7c4.2,0.4,8.5,0.6,12.9,0.6c4.4,0,8.7-0.2,12.9-0.6C199.2,203.9,193.6,217.5,186.7,217.5 M174.6,173.4c1.9-12,6.6-20.5,12-20.5c5.5,0,10.1,8.5,12,20.5c-3.8,0.3-7.9,0.5-12,0.5C182.5,173.9,178.5,173.7,174.6,173.4 M206.1,172.5c-2.8-18.8-10.4-32.4-19.4-32.4c-9,0-16.6,13.5-19.4,32.4c-17.1-2.7-29-8.7-29-15.8c0-9.5,21.7-17.2,48.4-17.2c26.7,0,48.4,7.7,48.4,17.2 C235,163.7,223.1,169.8,206.1,172.5 M114.9,184.5c0-9.2,3.5-17.8,9.7-25.2c-0.1,0.5-0.1,1-0.1,1.6c0,11.6,17.4,21.4,41.6,25 c0,0.9,0,1.8,0,2.6c0,21.5,6,39.7,14.2,46C143.7,232.3,114.9,210.7,114.9,184.5 M193,234.5c8.2-6.3,14.2-24.5,14.2-46c0-0.9,0-1.8,0-2.6c24.2-3.6,41.6-13.5,41.6-25c0-0.5,0-1-0.1-1.6c6.2,7.4,9.7,16,9.7,25.2C258.4,210.7,229.6,232.3,193,234.5"/>
+                </svg>
+                <span>TME Network Fleet</span>
+                <span class="fleet-env-indicator-tag" id="fleetEnvIndicatorTag">PROD</span>
+              </span>
+              <h2>Charging Stations Overview</h2>
+              <p>Fleet-wide connectivity health, hardware deployment, and diagnostic telemetry across 28 European operating markets.</p>
+            </div>
+            <div class="fleet-hero-side">
+              <button type="button" class="fleet-hero-card fleet-ops-banner-card" id="openOpsAnalyticsHeroBtn" title="Open System Operations &amp; Fleet Analytics">
+                <div class="hero-card-header">
+                  <div class="ops-card-badge">
+                    <span class="ops-pulse-beacon"></span>
+                    <span>OPS INTELLIGENCE</span>
+                  </div>
+                  <span class="ops-arrow-pill">Open View →</span>
+                </div>
+                <div class="hero-card-headline">
+                  <strong>System Analytics &amp; Insights</strong>
+                </div>
+                <p class="hero-card-sub">Fleet status breakdown, 28 EU countries &amp; firmware compliance</p>
+              </button>
+
+              <div class="fleet-hero-card fleet-direct-jump-card">
+                <div class="hero-card-header">
+                  <div class="ops-card-badge">
+                    <svg viewBox="0 0 24 24" width="11" height="11" fill="none" stroke="currentColor" stroke-width="2.5"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+                    <span>DIRECT LOOKUP</span>
+                  </div>
+                  <span class="hero-card-tag">Quick Jump</span>
+                </div>
+                <div class="hero-card-headline">
+                  <strong>Charger Investigation</strong>
+                </div>
+                <div class="fleet-jump-input-group">
+                  <span class="fleet-jump-icon">
+                    <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2"><path d="M6.3 20.3a2.4 2.4 0 0 0 3.4 0L12 18l-6-6-2.3 2.3a2.4 2.4 0 0 0 0 3.4z"/><path d="m2 22 3-3"/></svg>
+                  </span>
+                  <input type="text" id="fleetDirectSerialInput" placeholder="Enter Serial (e.g. TACW2244723S0930)" autocomplete="off" spellcheck="false" />
+                  <button type="button" id="fleetDirectJumpBtn" class="primary">
+                    <span>Open</span>
+                    <svg viewBox="0 0 24 24" width="11" height="11" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="9 18 15 12 9 6"/></svg>
+                  </button>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <!-- 4 Fleet KPI & Analytics Cards -->
+          <div class="fleet-kpi-grid">
+            <div class="fleet-kpi-card" id="kpiFleetSize">
+              <div class="kpi-icon-box kpi-blue">
+                <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2"><rect x="4" y="2" width="16" height="20" rx="3"/><circle cx="12" cy="10" r="3"/><path d="M12 18h.01"/></svg>
+              </div>
+              <div class="kpi-body">
+                <span class="kpi-title">Fleet Size</span>
+                <strong class="kpi-num" id="kpiFleetTotal">33,327</strong>
+                <span class="kpi-desc" id="kpiFleetDesc">Registered wallbox units</span>
+              </div>
+            </div>
+
+            <div class="fleet-kpi-card" id="kpiAvailability">
+              <div class="kpi-icon-box kpi-green">
+                <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 14 14"/></svg>
+              </div>
+              <div class="kpi-body">
+                <span class="kpi-title">Connector Availability</span>
+                <div class="kpi-split-row">
+                  <span class="kpi-status-tag avail" id="kpiAvailBadge">● ~11.2k Available</span>
+                  <span class="kpi-status-tag disc" id="kpiDiscBadge">● ~21.8k Disconnected</span>
+                </div>
+                <div class="kpi-bar-track">
+                  <div class="kpi-bar-fill avail" id="kpiAvailBar" style="width: 34%;"></div>
+                  <div class="kpi-bar-fill disc" id="kpiDiscBar" style="width: 66%;"></div>
+                </div>
+              </div>
+            </div>
+
+            <div class="fleet-kpi-card" id="kpiHardware">
+              <div class="kpi-icon-box kpi-purple">
+                <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 6 6 18"/><path d="m14 6 4 4"/><path d="m6 14 4 4"/></svg>
+              </div>
+              <div class="kpi-body">
+                <span class="kpi-title">Top Deployed Models</span>
+                <strong class="kpi-text-highlight" id="kpiTopModels">Terra AC W22 · W7</strong>
+                <span class="kpi-desc" id="kpiModelsCount">22 certified models deployed</span>
+              </div>
+            </div>
+
+            <div class="fleet-kpi-card" id="kpiFirmware">
+              <div class="kpi-icon-box kpi-amber">
+                <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"/></svg>
+              </div>
+              <div class="kpi-body">
+                <span class="kpi-title">Firmware Builds</span>
+                <strong class="kpi-text-highlight" id="kpiTopFirmwares">v1.8.37 / v2.2.3</strong>
+                <span class="kpi-desc" id="kpiFirmwaresCount">24 tracked version releases</span>
+              </div>
+            </div>
+          </div>
+        </section>
+
+        <!-- V1G and Smart Charging AGG Outages & Health Monitor -->
+        <section class="fleet-outages-panel" id="fleetOutagesSection">
+          <div class="outages-summary-bar" id="outagesSummaryBar">
+            <div class="outages-summary-left">
+              <span class="outages-state-beacon nominal" id="outagesStateBeacon"></span>
+              <div class="outages-summary-text">
+                <div class="outages-title-row">
+                  <span class="outages-title">V1G and Smart Charging AGG outages</span>
+                  <span class="outages-active-badge nominal" id="outagesActiveBadge">2 Aggregators Operational</span>
+                </div>
+                <span class="outages-subtitle" id="outagesSubtitle">Live status &amp; 30-day incident history for Centrica and Haulogy aggregators</span>
+              </div>
+            </div>
+
+            <div class="outages-summary-right">
+              <div class="outages-toggle-group">
+                <button type="button" class="outages-refresh-btn" id="outagesRefreshBtn" title="Refresh aggregator telemetry">
+                  <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2"><path d="M21.5 2v6h-6M21.34 15.57a10 10 0 1 1-.57-8.38l5.67-5.67"/></svg>
+                </button>
+              </div>
+            </div>
+          </div>
+
+          <!-- Compact Aggregator Cards Grid (centrica & haulogy, excluding hiven) -->
+          <div class="agg-cards-grid" id="aggCardsGrid">
+            <!-- Dynamically rendered via app.js -->
+          </div>
+        </section>
+
+        <!-- Compact Aggregator Outage List Dialog -->
+        <dialog id="aggOutageListDialog" class="agg-outage-dialog">
+          <div class="agg-dialog-box">
+            <div class="agg-dialog-header">
+              <div class="agg-dialog-title-group">
+                <span class="agg-dialog-icon">
+                  <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 14 14"/></svg>
+                </span>
+                <div>
+                  <h3 class="agg-dialog-title" id="aggDialogTitle">Aggregator Outage History</h3>
+                  <span class="agg-dialog-subtitle" id="aggDialogSubtitle">Recorded incident events</span>
+                </div>
+              </div>
+              <button type="button" class="agg-dialog-close-btn" id="aggDialogCloseBtn" title="Close dialog">✕</button>
+            </div>
+            <div class="agg-dialog-body" id="aggDialogBody"></div>
+          </div>
+        </dialog>
+
+        <!-- Lower ~70%: Charging Stations Table Section -->
+        <section class="fleet-table-panel">
+          <!-- Filter Toolbar matching reference image -->
+          <div class="fleet-toolbar">
+            <div class="fleet-search-group">
+              <span class="fleet-search-label">Search by</span>
+              <div class="fleet-search-input-box">
+                <svg class="search-icon" viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+                <input type="text" id="fleetSearchSerialInput" placeholder="Serial number" autocomplete="off" spellcheck="false" />
+                <button type="button" id="fleetClearSearchBtn" class="filter-clear-btn" hidden title="Clear search">✕</button>
+              </div>
+            </div>
+
+            <div class="fleet-filters-row">
+              <div class="fleet-select-container">
+                <select id="fleetModelSelect" aria-label="Select a model">
+                  <option value="">Select a model</option>
+                </select>
+              </div>
+
+              <div class="fleet-select-container">
+                <select id="fleetVersionSelect" aria-label="Select a version">
+                  <option value="">Select a version</option>
+                </select>
+              </div>
+
+              <div class="fleet-select-container">
+                <select id="fleetStatusSelect" aria-label="Select a status">
+                  <option value="">Select a status</option>
+                </select>
+              </div>
+
+              <div class="fleet-select-container">
+                <select id="fleetCountrySelect" aria-label="Select a country">
+                  <option value="">Select a country</option>
+                </select>
+              </div>
+
+              <button type="button" id="fleetResetFiltersBtn" class="fleet-btn fleet-btn-reset" title="Reset all filters">
+                <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"/><path d="M3 3v5h5"/></svg>
+                <span>Reset</span>
+              </button>
+
+              <button type="button" id="fleetRefreshBtn" class="fleet-btn fleet-btn-refresh" title="Refresh fleet list">
+                <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2"><path d="M21.5 2v6h-6M21.34 15.57a10 10 0 1 1-.57-8.38l5.67-5.67"/></svg>
+              </button>
+            </div>
+          </div>
+
+          <!-- Table Container -->
+          <div class="table-wrap fleet-table-wrapper">
+            <table class="fleet-table" id="fleetTable">
+              <thead>
+                <tr>
+                  <th>Serial Number</th>
+                  <th>Model</th>
+                  <th>Version</th>
+                  <th>Status</th>
+                  <th>Country</th>
+                  <th class="actions-col">Action</th>
+                </tr>
+              </thead>
+              <tbody id="fleetTableBody">
+                <tr>
+                  <td colspan="6" class="fleet-loading-row">
+                    <div class="fleet-spinner"></div>
+                    <span>Loading charging stations fleet...</span>
+                  </td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+
+          <!-- Pagination Bar matching reference image -->
+          <div class="fleet-pagination-bar">
+            <div class="fleet-page-size-box">
+              <label for="fleetPageSizeSelect">Items per page:</label>
+              <select id="fleetPageSizeSelect">
+                <option value="5">5</option>
+                <option value="10" selected>10</option>
+                <option value="25">25</option>
+                <option value="50">50</option>
+              </select>
+            </div>
+
+            <div class="fleet-range-display">
+              <span id="fleetRangeText">1 – 10 of 33,327</span>
+            </div>
+
+            <div class="fleet-page-nav">
+              <button type="button" id="fleetFirstPageBtn" class="fleet-nav-btn" title="First page" disabled>⮜⮜</button>
+              <button type="button" id="fleetPrevPageBtn" class="fleet-nav-btn" title="Previous page" disabled>⮜</button>
+              <span id="fleetCurrentPageLabel" class="fleet-current-page">1</span>
+              <button type="button" id="fleetNextPageBtn" class="fleet-nav-btn" title="Next page">⮞</button>
+              <button type="button" id="fleetLastPageBtn" class="fleet-nav-btn" title="Last page">⮞⮞</button>
+            </div>
+          </div>
+        </section>
+      </main>
+
+      <!-- VIEW 2: CHARGER DETAIL VIEW (ACTIVE WHEN CHARGER SELECTED) -->
+      <main id="chargerView" class="charger-view" hidden>
+      <section class="panel query-panel" aria-label="Charger and time range">
+        <!-- TIER 1: CHARGER IDENTITY & TELEMETRY LIVE COMMAND -->
+        <div class="identity-row query-panel-header">
+          <div class="charger-identity-control">
+            <div class="serial-field">
+              <div class="serial-input-wrapper">
+                <span class="serial-input-icon" title="Wallbox Connector">
+                  <svg class="svg-icon" viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M6.3 20.3a2.4 2.4 0 0 0 3.4 0L12 18l-6-6-2.3 2.3a2.4 2.4 0 0 0 0 3.4z"/><path d="m2 22 3-3"/><path d="M7.5 13.5 10 11"/><path d="M10.5 16.5 13 14"/><path d="m18 3-4 4h3l-2 5 4-4h-3l2-5z"/></svg>
+                </span>
+                <span class="serial-oem-tag" title="Toyota Europe Certified Wallbox">
+                  <svg class="inline-toyota-emblem" viewBox="74.7 74.7 224 224" width="10" height="10" fill="currentColor" aria-hidden="true">
+                    <path d="M224,137.8c-10.4-3.3-23.3-5.3-37.4-5.3c-14,0-27,2-37.4,5.3c-27.6,8.9-46.6,27.3-46.6,48.7 c0,30,37.6,54.3,84,54.3c46.4,0,84-24.3,84-54.3C270.7,165.2,251.7,146.7,224,137.8 M186.7,217.5c-6.9,0-12.6-13.6-12.9-30.7c4.2,0.4,8.5,0.6,12.9,0.6c4.4,0,8.7-0.2,12.9-0.6C199.2,203.9,193.6,217.5,186.7,217.5 M174.6,173.4c1.9-12,6.6-20.5,12-20.5c5.5,0,10.1,8.5,12,20.5c-3.8,0.3-7.9,0.5-12,0.5C182.5,173.9,178.5,173.7,174.6,173.4 M206.1,172.5c-2.8-18.8-10.4-32.4-19.4-32.4c-9,0-16.6,13.5-19.4,32.4c-17.1-2.7-29-8.7-29-15.8c0-9.5,21.7-17.2,48.4-17.2c26.7,0,48.4,7.7,48.4,17.2 C235,163.7,223.1,169.8,206.1,172.5 M114.9,184.5c0-9.2,3.5-17.8,9.7-25.2c-0.1,0.5-0.1,1-0.1,1.6c0,11.6,17.4,21.4,41.6,25 c0,0.9,0,1.8,0,2.6c0,21.5,6,39.7,14.2,46C143.7,232.3,114.9,210.7,114.9,184.5 M193,234.5c8.2-6.3,14.2-24.5,14.2-46c0-0.9,0-1.8,0-2.6c24.2-3.6,41.6-13.5,41.6-25c0-0.5,0-1-0.1-1.6c6.2,7.4,9.7,16,9.7,25.2C258.4,210.7,229.6,232.3,193,234.5"/>
+                  </svg>
+                  <span>TOYOTA EV</span>
+                </span>
+                <span class="charger-env-tag" id="chargerEnvTag">PROD</span>
+                <input id="serialNumber" type="text" value="TACW2244723S0930" placeholder="Charger serial number..." autocomplete="off" spellcheck="false" aria-label="Charger serial number" />
+                <span id="serialStatusBadge" class="serial-status-badge" hidden></span>
+                <button type="button" id="copySerial" class="serial-copy-btn" title="Copy charger serial number" aria-label="Copy charger serial number">
+                  <span class="copy-btn-icon"><svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg></span>
+                  <span class="copy-btn-label">Copy</span>
+                </button>
+              </div>
+              <datalist id="serialHistoryDatalist"></datalist>
+              <div id="serialHistory" class="serial-history" hidden></div>
+            </div>
+            <p id="serialFeedback" class="serial-feedback" role="status" aria-live="polite" hidden></p>
+            <p id="copyFeedback" class="serial-feedback" role="status" aria-live="polite" hidden></p>
+          </div>
+
+          <div class="token-status">
+            <div class="token-status-controls">
+              <div id="tokenLed" class="token-state" role="status" aria-label="Token status">
+                <span class="token-state-dot" aria-hidden="true"></span>
+                <span id="tokenStatusText">Missing</span>
+              </div>
+              <button type="button" id="refreshData" class="refresh-data" title="Refresh charger telemetry">
+                <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2"><path d="M21.5 2v6h-6M21.34 15.57a10 10 0 1 1-.57-8.38l5.67-5.67"/></svg>
+                <span>Refresh</span>
+              </button>
+              <span id="freshnessIndicator" class="freshness-indicator" role="status" aria-live="polite"></span>
+            </div>
+          </div>
+        </div>
+
+        <!-- TIER 2: HIGH-DENSITY TIME RANGE BAR & INTEGRATED DURATION -->
+        <div class="time-range-section">
+          <div class="filter-row date-window-row">
+            <div class="range-preset-field">
+              <span class="range-field-icon" aria-hidden="true">
+                <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 14 14"/></svg>
+              </span>
+              <select id="quickRange" aria-label="Time range preset">
+                <option value="">Custom range</option>
+                <option value="900000">Past 15 min</option>
+                <option value="3600000">Past 1 hour</option>
+                <option value="14400000">Past 4 hours</option>
+                <option value="86400000">Past 1 day</option>
+                <option value="259200000">Past 3 days</option>
+                <option value="604800000" selected>Past 7 days</option>
+                <option value="1209600000">Past 14 days</option>
+                <option value="2592000000">Past 30 days</option>
+              </select>
+            </div>
+
+            <div class="time-range-capsule">
+              <div class="date-time-pair date-time-start">
+                <span class="range-sublabel">From</span>
+                <input id="startDate" type="date" value="2026-09-23" aria-label="Start date" />
+                <div class="time-field">
+                  <button type="button" class="time-trigger" id="startTimeTrigger" aria-haspopup="dialog" aria-label="Start time">12:00 AM</button>
+                  <input id="startTimeInput" type="hidden" value="00:00:00" />
+                  <div class="time-popover" id="startTimePopover" hidden></div>
+                </div>
+              </div>
+
+              <span class="date-range-arrow" aria-hidden="true">
+                <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="9 18 15 12 9 6"/></svg>
+              </span>
+
+              <div class="date-time-pair date-time-end">
+                <span class="range-sublabel">To</span>
+                <input id="endDate" type="date" value="2026-09-25" aria-label="End date" />
+                <div class="time-field">
+                  <button type="button" class="time-trigger" id="endTimeTrigger" aria-haspopup="dialog" aria-label="End time">11:59 PM</button>
+                  <input id="endTimeInput" type="hidden" value="23:59:59" />
+                  <div class="time-popover" id="endTimePopover" hidden></div>
+                </div>
+              </div>
+            </div>
+
+            <div class="range-actions">
+              <button type="button" id="resetRange" title="Reset range to default 7 days">Reset</button>
+              <button type="button" id="applyRange" class="primary" title="Apply time range filter">Apply</button>
+            </div>
+
+            <div class="range-duration-pill">
+              <strong id="rangeDuration"></strong>
+            </div>
+          </div>
+          <p id="rangeFeedback" class="range-feedback" role="status" aria-live="polite" hidden></p>
+        </div>
+
+        <!-- TIER 3: SLIM INTEGRATED OVERVIEW SCRUBBER -->
+        <div class="range-bar">
+          <div class="range-summary-hidden" style="display:none;" aria-hidden="true">
+            <span id="rangeContextLabel" class="range-context-label">Historical context · past 30 days</span>
+            <div class="overview-scale">
+              <span id="rangeStartLabel"></span>
+              <span id="rangeEndLabel"></span>
+            </div>
+          </div>
+          <div id="rangeTrack" class="overview-track">
+            <div id="rangeTicks" class="range-ticks"></div>
+            <div id="rangeWindow" class="overview-window"><span class="overview-window-start"></span></div>
+            <div class="range-now-marker" aria-label="Current time"><span>Now</span></div>
+            <div class="overview-cursor" hidden></div>
+            <div class="overview-brush" hidden><span class="overview-window-start"></span></div>
+            <div class="overview-tip" hidden></div>
+          </div>
+        </div>
+      </section>
+
+      <div id="statusBanner" class="status-banner info">Ready to query event logs.</div>
+      <div id="investigationIndicator" class="investigation-indicator" role="status" aria-live="polite" hidden>
+        <span id="investigationLabel"></span>
+        <button type="button" id="returnTimelineContext" hidden>Return to previous context</button>
+        <button type="button" id="clearInvestigation">Clear investigation</button>
+      </div>
+
+      <section class="panel glance-section" aria-labelledby="glanceHeading">
+        <div class="panel-header">
+          <h2 id="glanceHeading">At a Glance</h2>
+        </div>
+        <div id="glanceGrid" class="glance-grid"></div>
+      </section>
+
+      <section id="attentionPanel" class="panel attention-panel" aria-labelledby="attentionHeading" hidden>
+        <div class="panel-header attention-header">
+          <div class="attention-title-wrap">
+            <span class="attention-alert-icon">
+              <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2"><path d="m21.73 18-8-14a2 2 0 0 0-3.48 0l-8 14A2 2 0 0 0 4 21h16a2 2 0 0 0 1.73-3Z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>
+            </span>
+            <h2 id="attentionHeading">Attention Required</h2>
+            <span id="attentionCountBadge" class="attention-count-badge">0</span>
+          </div>
+        </div>
+        <div id="attentionItems" class="attention-items"></div>
+      </section>
+
+
+      <section class="panel diagnostics-panel" aria-labelledby="diagnosticsHeading">
+        <div class="panel-header">
+          <h2 id="diagnosticsHeading">Diagnostics</h2>
+        </div>
+        <div class="diagnostics-toolbar" aria-label="Diagnostic tools">
+          <label>Connector <select id="diagnosticConnector"><option value="">All connectors</option></select></label>
+          <details class="diagnostic-menu refresh-menu">
+            <summary>Refresh data</summary>
+              <div class="diagnostic-menu-panel">
+              <button type="button" id="refreshAllRelevant" data-close-menu>Refresh all current data</button>
+              <div class="diagnostic-menu-divider"></div>
+              <button type="button" id="recheckCharger" data-close-menu>Recheck charger</button>
+              <button type="button" id="refreshEventsOnly" data-close-menu>Refresh events</button>
+              <button type="button" id="refreshSessionsOnly" data-close-menu>Refresh sessions</button>
+              <button type="button" id="refreshConnectorState" data-close-menu>Refresh connector history</button>
+            </div>
+          </details>
+          <div class="diagnostic-toolbar-actions">
+            <details class="diagnostic-menu more-menu">
+              <summary>Copy / export</summary>
+              <div class="diagnostic-menu-panel">
+              <button type="button" id="copyInvestigationSummary" data-close-menu>Copy investigation summary</button>
+              <button type="button" id="copySelectedEvent" data-close-menu>Copy selected event</button>
+              <button type="button" id="copySelectedEventJson" data-close-menu>Copy event JSON</button>
+              <button type="button" id="copySelectedEventId" data-close-menu>Copy event ID</button>
+              <button type="button" id="copySelectedEventTimestamp" data-close-menu>Copy event timestamp</button>
+              <button type="button" id="copyEventContext" data-close-menu>Copy event context</button>
+              <div class="diagnostic-menu-divider"></div>
+              <button type="button" id="exportInvestigation" data-close-menu>Export investigation JSON</button>
+              </div>
+            </details>
+            <button type="button" id="runDiagnostics" class="primary">Run checks</button>
+          </div>
+        </div>
+        <nav class="diagnostic-workspace-nav" aria-label="Investigation views">
+          <span>Investigate</span>
+          <a href="#connectorPanel">Connector history</a>
+          <a href="#chargingSessionsPanel">Sessions &amp; analysis</a>
+          <a href="#eventsPanel">Events &amp; timeline</a>
+        </nav>
+        <details id="diagnosticsDisclosure" class="diagnostic-results-disclosure" hidden>
+          <summary class="diagnostic-results-toggle">Results</summary>
+          <div class="diagnostics-content">
+            <p id="diagnosticStatus" class="diagnostic-status" role="status" aria-live="polite">Run checks to inspect currently loaded data.</p>
+            <div id="diagnosticResults" class="diagnostic-results" aria-live="polite"></div>
+          </div>
+        </details>
+      </section>
+
+      <section class="panel operations-panel operations-toolkit-panel" id="operationsPanel" aria-labelledby="operationsHeading">
+        <div class="toolkit-top-bar">
+          <div class="toolkit-identity">
+            <span class="toolkit-icon" aria-hidden="true">
+              <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+                <path d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.77-3.77a6 6 0 0 1-7.94 7.94l-6.91 6.91a2.12 2.12 0 0 1-3-3l6.91-6.91a6 6 0 0 1 7.94-7.94l-3.76 3.76z"/>
+              </svg>
+            </span>
+            <div class="toolkit-title-group">
+              <h2 id="operationsHeading" class="toolkit-heading">Operations Toolkit</h2>
+              <span id="supportOperationSectionTarget" class="toolkit-target-subtext">No selected wallbox</span>
+            </div>
+            <span class="interactions-live-pill" id="interactionsLivePill" title="Live SSE telemetry channel status">
+              <span class="sse-status-dot pulse" id="sseStatusDot"></span>
+              <span id="sseStatusText">Checking link...</span>
+            </span>
+          </div>
+
+          <div class="toolkit-controls-right">
+            <details class="support-operation-history-disclosure">
+              <summary><svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg> History <span id="supportOperationHistoryCount">0</span></summary>
+              <ol id="supportOperationHistory" class="support-operation-history"></ol>
+            </details>
+          </div>
+        </div>
+
+        <!-- Offline Banner (Shown dynamically when charger is offline) -->
+        <div class="toolkit-offline-alert" id="toolkitOfflineAlert" hidden>
+          <div class="toolkit-offline-icon">
+            <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+              <path d="M10.29 3.86 1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/>
+              <line x1="12" y1="9" x2="12" y2="13"/>
+              <line x1="12" y1="17" x2="12.01" y2="17"/>
+            </svg>
+          </div>
+          <div class="toolkit-offline-msg">
+            <strong>Charger is currently offline.</strong>
+            <span>Remote control commands and diagnostic operations are unavailable until connectivity is re-established.</span>
+          </div>
+        </div>
+
+        <!-- Toolkit Actions Bar -->
+        <div class="toolkit-actions-strip" id="toolkitActionsStrip">
+          <div class="toolkit-buttons-group">
+            <button type="button" id="interactionUnlockBtn" class="toolkit-action-btn btn-unlock" disabled title="Remotely unlock connector latch">
+              <span class="btn-spinner" id="unlockBtnSpinner" hidden></span>
+              <svg class="btn-icon" id="unlockBtnIcon" viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+                <path d="M12 2v6m-4-3h8M9 8h6a2 2 0 0 1 2 2v3a4 4 0 0 1-4 4h-2a4 4 0 0 1-4-4v-3a2 2 0 0 1 2-2zm3 9v5"/>
+              </svg>
+              <span class="btn-label" id="unlockBtnLabel">Unlock cable</span>
+            </button>
+
+            <button type="button" id="interactionRebootBtn" class="toolkit-action-btn btn-reboot" disabled title="Remotely reboot wallbox controller">
+              <span class="btn-spinner" id="rebootBtnSpinner" hidden></span>
+              <svg class="btn-icon" id="rebootBtnIcon" viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+                <path d="M21.5 2v6h-6M21.34 15.57a10 10 0 1 1-.57-8.38l5.67-5.67"/>
+              </svg>
+              <span class="btn-label" id="rebootBtnLabel">Reboot wallbox</span>
+            </button>
+
+            <div class="toolkit-v-divider" aria-hidden="true"></div>
+
+            <details class="diagnostic-menu operations-menu toolkit-operations-menu">
+              <summary class="toolkit-menu-summary">
+                <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
+                <span>Remote Operations</span>
+                <svg viewBox="0 0 24 24" width="11" height="11" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="6 9 12 15 18 9"/></svg>
+              </summary>
+              <div id="supportOperationMenu" class="diagnostic-menu-panel diagnostic-operation-menu"></div>
+            </details>
+          </div>
+        </div>
+
+        <div class="interaction-feedback-strip" id="interactionFeedbackStrip" hidden>
+          <div class="feedback-content" id="interactionFeedbackContent"></div>
+          <button type="button" class="feedback-close-btn" id="interactionFeedbackClose" title="Dismiss">✕</button>
+        </div>
+        <dialog id="supportOperationDialog" class="support-operation-dialog" aria-labelledby="supportOperationDialogTitle">
+          <div class="support-operation-dialog-heading">
+            <div>
+              <span>Operation confirmation</span>
+              <h3 id="supportOperationDialogTitle"></h3>
+            </div>
+            <button type="button" id="supportOperationDialogClose" aria-label="Close">×</button>
+          </div>
+          <p id="supportOperationDialogDescription" class="support-operation-dialog-description"></p>
+          <p id="supportOperationDialogTarget" class="support-operation-target"></p>
+          <label id="supportOwnerPinField" for="supportOwnerPin" hidden>New owner PIN
+            <input id="supportOwnerPin" type="password" autocomplete="new-password" inputmode="numeric" />
+          </label>
+          <label id="supportFirmwareLocationField" for="supportFirmwareLocation" hidden>Firmware package URL
+            <input id="supportFirmwareLocation" type="url" autocomplete="off" />
+          </label>
+          <p id="supportOperationDialogStatus" class="support-operation-dialog-status" role="status" aria-live="polite"></p>
+          <p id="supportOperationResult" class="support-operation-result" role="status" aria-live="polite" hidden></p>
+          <div class="support-operation-dialog-actions">
+            <button type="button" id="supportOperationDialogCancel">Cancel</button>
+            <button type="button" id="supportOperationConfirm" class="primary" disabled>Confirm</button>
+          </div>
+        </dialog>
+
+        <!-- Remote Operation Confirmation Modal Dialog -->
+        <dialog id="interactionConfirmDialog" class="support-operation-dialog interaction-confirm-dialog" aria-labelledby="interactionDialogTitle">
+          <div class="support-operation-dialog-heading">
+            <div>
+              <span id="interactionDialogEyebrow">Remote Operation</span>
+              <h3 id="interactionDialogTitle">Confirm Action</h3>
+            </div>
+            <button type="button" id="interactionDialogClose" aria-label="Close">×</button>
+          </div>
+          <p id="interactionDialogDescription" class="support-operation-dialog-description"></p>
+          <div class="interaction-target-box" id="interactionTargetBox">
+            <span class="target-label">Target Unit:</span>
+            <code class="target-serial" id="interactionDialogTarget"></code>
+          </div>
+          <div id="interactionConnectorGroup" class="interaction-param-group" hidden>
+            <label for="interactionConnectorSelect">Connector ID</label>
+            <select id="interactionConnectorSelect">
+              <option value="1">Connector 1</option>
+              <option value="0">Connector 0 (Auxiliary)</option>
+              <option value="2">Connector 2</option>
+            </select>
+          </div>
+          <div id="interactionRebootGroup" class="interaction-param-group" hidden>
+            <label for="interactionRebootTypeSelect">Reboot Type</label>
+            <select id="interactionRebootTypeSelect">
+              <option value="Soft" selected>Soft Reboot (Graceful restart)</option>
+              <option value="Hard">Hard Reboot (Full power cycle)</option>
+            </select>
+          </div>
+          <p id="interactionDialogStatus" class="support-operation-dialog-status" role="status" aria-live="polite"></p>
+          <p id="interactionDialogResult" class="support-operation-result" role="status" aria-live="polite" hidden></p>
+          <div class="support-operation-dialog-actions">
+            <button type="button" id="interactionDialogCancel">Cancel</button>
+            <button type="button" id="interactionDialogConfirm" class="primary">Confirm & Execute</button>
+          </div>
+        </dialog>
+      </section>
+
+      <section id="smartInvestigationsPanel" class="panel smart-investigations-panel" aria-labelledby="smartInvestigationsHeading">
+        <div class="panel-header smart-investigations-header">
+          <div class="smart-investigations-title-wrap">
+            <span class="ai-sparkle-badge">
+              <svg viewBox="0 0 24 24" width="16" height="16" fill="currentColor"><path d="M12 2L14.4 7.6L20 10L14.4 12.4L12 18L9.6 12.4L4 10L9.6 7.6L12 2Z"/></svg>
+            </span>
+            <h2 id="smartInvestigationsHeading">Smart AI Investigations</h2>
+            <span class="ai-intel-pill">Live Intelligence</span>
+          </div>
+          <p id="smartInvestigationStatus" role="status" aria-live="polite">Load a charger to begin investigation.</p>
+        </div>
+        <p id="smartInvestigationMessage" class="smart-investigation-message" hidden></p>
+        <div id="smartInvestigationFindings" class="smart-investigation-findings" aria-live="polite"></div>
+        <form id="smartInvestigationChatForm" class="smart-investigation-chat" autocomplete="off">
+          <div class="ai-chat-header-row">
+            <label for="smartInvestigationQuestion" class="ai-chat-label">
+              <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>
+              <span>Ask AI Copilot</span>
+            </label>
+            <div class="ai-suggested-prompts" id="aiSuggestedPrompts">
+              <button type="button" class="ai-prompt-chip" data-query="Why did the recent sessions fail?">⚡ Why did sessions fail?</button>
+              <button type="button" class="ai-prompt-chip" data-query="What is the health status of Connector 1?">🔌 Connector 1 health</button>
+              <button type="button" class="ai-prompt-chip" data-query="Summarize all charger anomalies">📊 Summarize anomalies</button>
+            </div>
+          </div>
+          <div class="smart-investigation-input-row">
+            <div class="ai-input-wrapper">
+              <svg class="ai-input-icon" viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><path d="M12 16v-4"/><path d="M12 8h.01"/></svg>
+              <input id="smartInvestigationQuestion" type="text" maxlength="1000" placeholder="Ask AI anything about this charger, sessions, or errors..." disabled />
+            </div>
+            <button type="submit" class="ai-ask-submit-btn" aria-label="Ask about this investigation" disabled>
+              <span>Ask AI</span>
+              <svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2"><line x1="22" y1="2" x2="11" y2="13"/><polygon points="22 2 15 22 11 13 2 9 22 2"/></svg>
+            </button>
+          </div>
+        </form>
+        <div id="smartInvestigationLatestAnswer" class="smart-investigation-latest-answer" role="status" aria-live="polite" hidden>
+          <div class="ai-answer-header">
+            <span class="ai-avatar"><svg viewBox="0 0 24 24" width="13" height="13" fill="currentColor"><path d="M12 2L14.4 7.6L20 10L14.4 12.4L12 18L9.6 12.4L4 10L9.6 7.6L12 2Z"/></svg></span>
+            <span class="ai-answer-title">AI Synthesis</span>
+          </div>
+          <p id="smartInvestigationLatestQuestion" class="smart-investigation-latest-question"></p>
+          <div id="smartInvestigationAnswer" class="smart-investigation-answer"></div>
+        </div>
+      </section>
+
+      <section class="info-split">
+        <article class="panel info-card">
+          <div class="panel-header">
+            <h2>Charger info</h2>
+            <span id="chargerSummary" class="charger-lights">Search to load charger details</span>
+          </div>
+          <div id="chargerProfile" class="charger-profile">
+            <p class="empty-state">No charger record yet.</p>
+          </div>
+        </article>
+        <article class="panel info-card">
+          <div class="panel-header">
+            <h2>Charger access</h2>
+            <span id="accessSummary" class="charger-lights">Search to load access</span>
+          </div>
+          <div id="accessProfile" class="charger-profile">
+            <p class="empty-state">No access record yet.</p>
+          </div>
+        </article>
+        <article class="panel info-card">
+          <div class="panel-header">
+            <h2>Smart charging info</h2>
+            <span id="smartSummary" class="charger-lights">Search to load smart charging</span>
+          </div>
+          <div id="smartChargingProfile" class="charger-profile">
+            <p class="empty-state">No smart charging record yet.</p>
+          </div>
+        </article>
+        <article class="panel info-card">
+          <div class="panel-header">
+            <h2>Notable events</h2>
+          </div>
+          <div id="notableEvents" class="charger-profile">
+            <p class="empty-state">Search to load notable events.</p>
+          </div>
+        </article>
+      </section>
+
+      <section id="chargingSessionsPanel" class="panel">
+        <div class="panel-header">
+          <h2>Charging sessions</h2>
+          <span class="panel-hint">Scroll the bar to zoom. Hover a circle for the session.</span>
+        </div>
+        <div id="sessionOverview" class="timeline-overview"></div>
+        <div id="sessionStrip" class="session-strip"></div>
+        <div class="session-table-toolbar">
+          <div class="session-search-wrapper">
+            <svg class="search-icon" viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+            <input type="text" id="sessionTableFilter" placeholder="Search sessions (ID, Auth, Status, Type)..." autocomplete="off" />
+            <button type="button" id="sessionTableFilterClear" class="filter-clear-btn" hidden title="Clear search">✕</button>
+          </div>
+          <div class="session-filter-chips" id="sessionFilterChips">
+            <button type="button" class="filter-chip active" data-filter="all">All <span id="sessionFilterCountAll" class="chip-count">0</span></button>
+            <button type="button" class="filter-chip" data-filter="completed">Completed <span id="sessionFilterCountCompleted" class="chip-count">0</span></button>
+            <button type="button" class="filter-chip" data-filter="alerts">Alerts & Issues <span id="sessionFilterCountAlerts" class="chip-count">0</span></button>
+            <button type="button" class="filter-chip" data-filter="smart">Smart Charging <span id="sessionFilterCountSmart" class="chip-count">0</span></button>
+          </div>
+          <div class="session-table-actions">
+            <button type="button" id="exportSessionsCsv" class="session-export-btn" title="Export sessions table to CSV">
+              <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+              <span>Export CSV</span>
+            </button>
+            <span id="sessionVisibleCount" class="session-visible-count">Showing 0 sessions</span>
+          </div>
+        </div>
+        <div class="table-wrap session-scroll">
+          <table class="session-table" id="sessionTable">
+            <thead>
+              <tr>
+                <th data-sort-key="transactionId" class="sortable">Session <span class="sort-icon"></span></th>
+                <th data-sort-key="status" class="sortable">Status <span class="sort-icon"></span></th>
+                <th>Type</th>
+                <th>Connector</th>
+                <th>Auth</th>
+                <th data-sort-key="startTime" class="sortable">Start <span class="sort-icon"></span></th>
+                <th data-sort-key="stopTime" class="sortable">Stop <span class="sort-icon"></span></th>
+                <th data-sort-key="duration" class="sortable">Duration <span class="sort-icon"></span></th>
+                <th data-sort-key="consumption" class="sortable">Energy <span class="sort-icon"></span></th>
+                <th>SoC</th>
+                <th>Smart charging</th>
+                <th data-sort-key="important" class="sortable">Events <span class="sort-icon"></span></th>
+              </tr>
+            </thead>
+            <tbody id="sessionTableBody">
+              <tr><td colspan="12" class="empty-row">Search to load charging sessions.</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </section>
+
+      <section id="sessionAnalysis" class="panel" hidden>
+        <div class="panel-header">
+          <h2 id="sessionAnalysisTitle">Session analysis</h2>
+          <button id="sessionAnalysisClose" type="button">Close</button>
+        </div>
+        <div id="sessionAnalysisBody"></div>
+      </section>
+
+      <section class="panel timeline-panel" id="connectorPanel">
+        <div class="panel-header">
+          <h2>Connector status</h2>
+          <div id="connectorTabs" class="connector-tabs" role="tablist" aria-label="Connector timelines"></div>
+        </div>
+        <div id="connectorPanes" class="connector-panes"></div>
+      </section>
+
+      <section id="eventsPanel" class="panel events-section">
+        <div class="panel-header">
+          <h2>Events</h2>
+        </div>
+        <div id="eventLegend" class="event-legend" aria-label="Event type legend"></div>
+        <section class="filter-row">
+          <div class="type-filter">
+            <span class="filter-label">Event type(s)</span>
+            <div id="typeFilter" class="multi-select">
+              <button type="button" id="typeFilterTrigger" class="multi-trigger" aria-haspopup="listbox">All types</button>
+              <div id="typeFilterPanel" class="multi-panel" hidden></div>
+            </div>
+          </div>
+          <label>
+            Search events
+            <input id="eventNameSearch" type="text" placeholder="Name, type, connector, session..." />
+          </label>
+        </section>
+        <div class="timeline-tools">
+          <button id="timelineFit" type="button" class="timeline-fit-btn" title="Reset timeline to full range">
+            <svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"/><path d="M3 3v5h5"/></svg>
+            <span>Fit Window</span>
+          </button>
+          <span class="panel-hint">Drag the top bar to choose a time. Hover a dot for every event at that moment.</span>
+        </div>
+        <div id="overviewLegend" class="event-legend"></div>
+        <div id="timelineOverview" class="timeline-overview"></div>
+        <div id="timeline"></div>
+        <div id="eventHover" class="event-hover" hidden></div>
+        <section class="details-grid">
+          <div>
+            <div class="panel-header">
+              <h2>Events</h2>
+            </div>
+            <div class="table-wrap">
+              <table class="event-table">
+                <colgroup>
+                  <col style="width: 18%" />
+                  <col style="width: 21%" />
+                  <col style="width: 30%" />
+                  <col style="width: 15%" />
+                  <col style="width: 16%" />
+                </colgroup>
+                <thead>
+                  <tr>
+                    <th>Time</th>
+                    <th>Type</th>
+                    <th>Event</th>
+                    <th>Connector</th>
+                    <th>Session</th>
+                  </tr>
+                </thead>
+                <tbody id="eventTableBody"></tbody>
+              </table>
+            </div>
+          </div>
+          <div>
+            <div class="panel-header">
+              <h2>Selected event</h2>
+            </div>
+            <div id="relatedSession" class="related-session" hidden></div>
+            <pre id="detailPane">Select an event from the timeline or table to inspect its payload.</pre>
+          </div>
+        </section>
+      </section>
+      </main>
+
+      <!-- VIEW 3: OPERATIONS INTELLIGENCE & FLEET ANALYTICS VIEW -->
+      <main id="opsAnalyticsView" class="ops-analytics-view" hidden>
+        <!-- Top Operations View Header -->
+        <section class="ops-view-header">
+          <div class="ops-header-left">
+            <div class="ops-header-titles">
+              <div class="ops-eyebrow-row">
+                <svg class="inline-toyota-emblem" viewBox="74.7 74.7 224 224" width="12" height="12" fill="currentColor" aria-hidden="true">
+                  <path d="M224,137.8c-10.4-3.3-23.3-5.3-37.4-5.3c-14,0-27,2-37.4,5.3c-27.6,8.9-46.6,27.3-46.6,48.7 c0,30,37.6,54.3,84,54.3c46.4,0,84-24.3,84-54.3C270.7,165.2,251.7,146.7,224,137.8 M186.7,217.5c-6.9,0-12.6-13.6-12.9-30.7c4.2,0.4,8.5,0.6,12.9,0.6c4.4,0,8.7-0.2,12.9-0.6C199.2,203.9,193.6,217.5,186.7,217.5 M174.6,173.4c1.9-12,6.6-20.5,12-20.5c5.5,0,10.1,8.5,12,20.5c-3.8,0.3-7.9,0.5-12,0.5C182.5,173.9,178.5,173.7,174.6,173.4 M206.1,172.5c-2.8-18.8-10.4-32.4-19.4-32.4c-9,0-16.6,13.5-19.4,32.4c-17.1-2.7-29-8.7-29-15.8c0-9.5,21.7-17.2,48.4-17.2c26.7,0,48.4,7.7,48.4,17.2 C235,163.7,223.1,169.8,206.1,172.5 M114.9,184.5c0-9.2,3.5-17.8,9.7-25.2c-0.1,0.5-0.1,1-0.1,1.6c0,11.6,17.4,21.4,41.6,25 c0,0.9,0,1.8,0,2.6c0,21.5,6,39.7,14.2,46C143.7,232.3,114.9,210.7,114.9,184.5 M193,234.5c8.2-6.3,14.2-24.5,14.2-46c0-0.9,0-1.8,0-2.6c24.2-3.6,41.6-13.5,41.6-25c0-0.5,0-1-0.1-1.6c6.2,7.4,9.7,16,9.7,25.2C258.4,210.7,229.6,232.3,193,234.5"/>
+                </svg>
+                <span>Toyota Motor Europe · Operational Telemetry &amp; System Intelligence</span>
+                <span class="ops-env-pill" id="opsEnvPill">PROD</span>
+              </div>
+              <h2>Fleet Operations Analytics &amp; System Insights</h2>
+              <p>Fleet-wide connectivity health, European geographical deployment, certified firmware distribution, and aggregator network resilience.</p>
+            </div>
+          </div>
+
+          <div class="ops-header-right">
+            <div class="ops-sync-meta">
+              <span class="ops-beacon-dot"></span>
+              <span class="ops-sync-text" id="opsSyncStatusText">Live Data Synced</span>
+              <span class="ops-sync-time" id="opsSyncTime">Just now</span>
+            </div>
+            <button type="button" class="ops-action-btn ops-refresh-btn" id="opsRefreshBtn" title="Force refresh live system analytics">
+              <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2"><path d="M21.5 2v6h-6M21.34 15.57a10 10 0 1 1-.57-8.38l5.67-5.67"/></svg>
+              <span>Refresh Telemetry</span>
+            </button>
+          </div>
+        </section>
+
+        <!-- Row 1: Executive KPI Telemetry Scorecard (6 Cards) -->
+        <section class="ops-kpi-scorecard">
+          <div class="ops-kpi-card ops-kpi-blue" id="opsKpiTotal">
+            <div class="ops-kpi-top">
+              <span class="ops-kpi-icon">
+                <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2"><rect x="4" y="2" width="16" height="20" rx="3"/><circle cx="12" cy="10" r="3"/><path d="M12 18h.01"/></svg>
+              </span>
+              <span class="ops-kpi-tag" id="opsKpiTotalTag">Connected Network</span>
+            </div>
+            <div class="ops-kpi-value-row">
+              <strong class="ops-kpi-num" id="opsKpiFleetTotal">33,327</strong>
+            </div>
+            <span class="ops-kpi-title">Total Registered Fleet</span>
+            <span class="ops-kpi-desc" id="opsKpiFleetDesc">Across European public &amp; private charging points</span>
+          </div>
+
+          <div class="ops-kpi-card ops-kpi-green" id="opsKpiAvailability">
+            <div class="ops-kpi-top">
+              <span class="ops-kpi-icon">
+                <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 14 14"/></svg>
+              </span>
+              <span class="ops-kpi-tag success" id="opsKpiAvailPctBadge">33.6% Operational</span>
+            </div>
+            <div class="ops-kpi-value-row">
+              <strong class="ops-kpi-num" id="opsKpiAvailTotal">11,193</strong>
+              <span class="ops-kpi-sub">/ 33.3k</span>
+            </div>
+            <span class="ops-kpi-title">Available &amp; Ready Connectors</span>
+            <div class="ops-mini-track">
+              <div class="ops-mini-fill avail" id="opsKpiAvailBar" style="width: 33.6%;"></div>
+            </div>
+            <span class="ops-kpi-desc" id="opsKpiAvailDesc">22,101 disconnected or offline</span>
+          </div>
+
+          <div class="ops-kpi-card ops-kpi-red" id="opsKpiFaults">
+            <div class="ops-kpi-top">
+              <span class="ops-kpi-icon">
+                <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2"><path d="m21.73 18-8-14a2 2 0 0 0-3.48 0l-8 14A2 2 0 0 0 4 21h16a2 2 0 0 0 1.73-3Z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>
+              </span>
+              <span class="ops-kpi-tag alert" id="opsKpiFaultPctBadge">0.10% Fault Rate</span>
+            </div>
+            <div class="ops-kpi-value-row">
+              <strong class="ops-kpi-num" id="opsKpiFaultTotal">33</strong>
+              <span class="ops-kpi-sub">Units Trip</span>
+            </div>
+            <span class="ops-kpi-title">Active Faulted Units</span>
+            <span class="ops-kpi-desc" id="opsKpiFaultDesc">Safety isolations under active monitoring</span>
+          </div>
+
+          <div class="ops-kpi-card ops-kpi-emerald" id="opsKpiCountries">
+            <div class="ops-kpi-top">
+              <span class="ops-kpi-icon">
+                <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><path d="M12 2a14.5 14.5 0 0 0 0 20 14.5 14.5 0 0 0 0-20"/><path d="M2 12h20"/></svg>
+              </span>
+              <span class="ops-kpi-tag" id="opsKpiMarketsTag">Pan-European</span>
+            </div>
+            <div class="ops-kpi-value-row">
+              <strong class="ops-kpi-num" id="opsKpiMarketsTotal">28</strong>
+              <span class="ops-kpi-sub">Markets</span>
+            </div>
+            <span class="ops-kpi-title">Operating European Countries</span>
+            <span class="ops-kpi-desc" id="opsKpiMarketsDesc">Top: GB (7,637) · ES (783) · BE (47)</span>
+          </div>
+
+          <div class="ops-kpi-card ops-kpi-purple" id="opsKpiModels">
+            <div class="ops-kpi-top">
+              <span class="ops-kpi-icon">
+                <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="7" width="20" height="14" rx="2" ry="2"/><path d="M16 21V5a2 2 0 0 0-2-2h-4a2 2 0 0 0-2 2v16"/></svg>
+              </span>
+              <span class="ops-kpi-tag">Certified Catalog</span>
+            </div>
+            <div class="ops-kpi-value-row">
+              <strong class="ops-kpi-num" id="opsKpiModelsTotal">22</strong>
+              <span class="ops-kpi-sub">Variants</span>
+            </div>
+            <span class="ops-kpi-title">Certified Hardware Models</span>
+            <span class="ops-kpi-desc" id="opsKpiModelsDesc">53.4% 22kW 3-Phase · 35.9% 7.4kW</span>
+          </div>
+
+          <div class="ops-kpi-card ops-kpi-amber" id="opsKpiAggregators">
+            <div class="ops-kpi-top">
+              <span class="ops-kpi-icon">
+                <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/></svg>
+              </span>
+              <span class="ops-kpi-tag success" id="opsKpiAggSlaBadge">99.9% Uptime</span>
+            </div>
+            <div class="ops-kpi-value-row">
+              <strong class="ops-kpi-num" id="opsKpiAggTotal">2 / 2</strong>
+              <span class="ops-kpi-sub">Nominal</span>
+            </div>
+            <span class="ops-kpi-title">V1G &amp; Smart Charging Aggregators</span>
+            <span class="ops-kpi-desc" id="opsKpiAggDesc">Centrica &amp; Haulogy active (Hiven excluded)</span>
+          </div>
+        </section>
+
+        <!-- Row 2: Status Breakdown & Geographic European Deployment -->
+        <section class="ops-grid-two-col">
+          <!-- Card 1: Connector Status Breakdown & Health -->
+          <div class="ops-card ops-chart-card" id="opsStatusBreakdownCard">
+            <div class="ops-card-header">
+              <div class="ops-card-title-group">
+                <span class="ops-card-icon-wrap icon-status">
+                  <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 14 14"/></svg>
+                </span>
+                <div>
+                  <h3 class="ops-card-title">Connector Status &amp; Operational Health</h3>
+                  <span class="ops-card-subtitle">Real-time OCPP status distribution across all fleet connectors</span>
+                </div>
+              </div>
+              <span class="ops-card-badge" id="opsStatusTotalBadge">33,327 Units</span>
+            </div>
+
+            <!-- Segmented Visual Bar -->
+            <div class="ops-status-stacked-bar" id="opsStatusStackedBar">
+              <div class="stacked-segment avail" id="segAvail" style="width: 33.6%;" title="Available: 11,193 (33.6%)"></div>
+              <div class="stacked-segment fault" id="segFault" style="width: 0.1%;" title="Faulted: 33 (0.10%)"></div>
+              <div class="stacked-segment disc" id="segDisc" style="width: 66.3%;" title="Disconnected: 22,101 (66.3%)"></div>
+            </div>
+
+            <!-- Detailed Status Legend Table -->
+            <div class="ops-status-table-wrap">
+              <table class="ops-analytics-table">
+                <thead>
+                  <tr>
+                    <th>OCPP Status</th>
+                    <th>Station Count</th>
+                    <th>Fleet Share</th>
+                    <th>Operational Definition</th>
+                    <th>Action</th>
+                  </tr>
+                </thead>
+                <tbody id="opsStatusTableBody">
+                  <!-- Dynamically populated via app.js -->
+                </tbody>
+              </table>
+            </div>
+          </div>
+
+          <!-- Card 2: European Market Deployment Distribution -->
+          <div class="ops-card ops-chart-card" id="opsCountryDistributionCard">
+            <div class="ops-card-header">
+              <div class="ops-card-title-group">
+                <span class="ops-card-icon-wrap icon-geo">
+                  <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><path d="M12 2a14.5 14.5 0 0 0 0 20 14.5 14.5 0 0 0 0-20"/><path d="M2 12h20"/></svg>
+                </span>
+                <div>
+                  <h3 class="ops-card-title">European Geographic Deployment</h3>
+                  <span class="ops-card-subtitle">Active charger deployment across 28 European operating markets</span>
+                </div>
+              </div>
+              <span class="ops-card-badge info" id="opsCountryCountBadge">13 Active EU Hubs</span>
+            </div>
+
+            <div class="ops-country-bars-container" id="opsCountryBarsContainer">
+              <!-- Dynamically populated via app.js -->
+            </div>
+          </div>
+        </section>
+
+        <!-- Row 3: Hardware Power Architecture & Firmware Compliance -->
+        <section class="ops-grid-two-col">
+          <!-- Card 3: Hardware Portfolio & Power Architecture -->
+          <div class="ops-card ops-chart-card" id="opsHardwareCard">
+            <div class="ops-card-header">
+              <div class="ops-card-title-group">
+                <span class="ops-card-icon-wrap icon-hardware">
+                  <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 6 6 18"/><path d="m14 6 4 4"/><path d="m6 14 4 4"/></svg>
+                </span>
+                <div>
+                  <h3 class="ops-card-title">Hardware Architecture &amp; Power Capability</h3>
+                  <span class="ops-card-subtitle">Certified wallbox power ratings, socket types and IoT network modems</span>
+                </div>
+              </div>
+              <span class="ops-card-badge">22 Certified Models</span>
+            </div>
+
+            <!-- Power Rating Distribution Widget -->
+            <div class="ops-power-summary-grid">
+              <div class="power-summary-box">
+                <div class="power-box-header">
+                  <span class="power-badge kw22">22 kW</span>
+                  <span class="power-pct">53.4%</span>
+                </div>
+                <strong class="power-title">3-Phase High Power</strong>
+                <span class="power-desc">Commercial, Dealerships &amp; Fleet Hubs</span>
+                <div class="power-bar-track"><div class="power-bar-fill kw22" style="width: 53.4%;"></div></div>
+              </div>
+
+              <div class="power-summary-box">
+                <div class="power-box-header">
+                  <span class="power-badge kw7">7.4 kW</span>
+                  <span class="power-pct">35.9%</span>
+                </div>
+                <strong class="power-title">1-Phase Residential</strong>
+                <span class="power-desc">Single-phase domestic installations</span>
+                <div class="power-bar-track"><div class="power-bar-fill kw7" style="width: 35.9%;"></div></div>
+              </div>
+
+              <div class="power-summary-box">
+                <div class="power-box-header">
+                  <span class="power-badge kw11">11 kW</span>
+                  <span class="power-pct">10.7%</span>
+                </div>
+                <strong class="power-title">3-Phase Standard</strong>
+                <span class="power-desc">Standard balanced grid installations</span>
+                <div class="power-bar-track"><div class="power-bar-fill kw11" style="width: 10.7%;"></div></div>
+              </div>
+            </div>
+
+            <!-- Top Deployed Hardware Models List -->
+            <div class="ops-models-list-wrap">
+              <h4 class="ops-subhead">Top Deployed Commercial Variants</h4>
+              <div class="ops-models-list" id="opsModelsList">
+                <!-- Dynamically populated via app.js -->
+              </div>
+            </div>
+
+            <!-- Connectivity Modem Distribution -->
+            <div class="ops-connectivity-strip">
+              <div class="conn-item">
+                <span class="conn-dot lte"></span>
+                <span class="conn-name">4G LTE Cellular Modem:</span>
+                <strong>68.4%</strong>
+              </div>
+              <div class="conn-item">
+                <span class="conn-dot wifi"></span>
+                <span class="conn-name">Wi-Fi 2.4 GHz:</span>
+                <strong>24.2%</strong>
+              </div>
+              <div class="conn-item">
+                <span class="conn-dot eth"></span>
+                <span class="conn-name">Ethernet LAN:</span>
+                <strong>7.4%</strong>
+              </div>
+            </div>
+          </div>
+
+          <!-- Card 4: Firmware Version Compliance & Security Matrix -->
+          <div class="ops-card ops-chart-card" id="opsFirmwareCard">
+            <div class="ops-card-header">
+              <div class="ops-card-title-group">
+                <span class="ops-card-icon-wrap icon-firmware">
+                  <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"/></svg>
+                </span>
+                <div>
+                  <h3 class="ops-card-title">Certified Firmware Release &amp; Security Compliance</h3>
+                  <span class="ops-card-subtitle">Version distribution and lifecycle maintenance across active chargers</span>
+                </div>
+              </div>
+              <span class="ops-card-badge success">98.4% Compliant</span>
+            </div>
+
+            <!-- Compliance Summary Widget -->
+            <div class="ops-fw-compliance-banner">
+              <div class="fw-compliance-score">
+                <span class="score-num">98.4%</span>
+                <span class="score-label">Network Lifecycle Score</span>
+              </div>
+              <div class="fw-compliance-info">
+                <strong>Certified Production Firmware Builds</strong>
+                <p>Over 98% of operational wallboxes run certified maintenance builds (v1.6.9, v1.8.x). 27 legacy units (v1.5.26) queued for remote OTA firmware upgrade.</p>
+              </div>
+            </div>
+
+            <!-- Firmware Distribution Table -->
+            <div class="ops-firmware-table-wrap">
+              <table class="ops-analytics-table">
+                <thead>
+                  <tr>
+                    <th>Version Build</th>
+                    <th>Lifecycle Tier</th>
+                    <th>Status</th>
+                    <th>Sample Deployed</th>
+                    <th>Action</th>
+                  </tr>
+                </thead>
+                <tbody id="opsFirmwareTableBody">
+                  <!-- Dynamically populated via app.js -->
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </section>
+
+        <!-- Row 4: V1G & Smart Charging Aggregators Resilience -->
+        <section class="ops-card ops-aggregators-section" id="opsAggregatorsCard">
+          <div class="ops-card-header">
+            <div class="ops-card-title-group">
+              <span class="ops-card-icon-wrap icon-agg">
+                <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/></svg>
+              </span>
+              <div>
+                <h3 class="ops-card-title">V1G &amp; Smart Charging Aggregator Network Resilience</h3>
+                <span class="ops-card-subtitle">Live health telemetry and 30-day incident SLAs for Centrica and Haulogy (Excluding Hiven)</span>
+              </div>
+            </div>
+            <div class="ops-card-actions">
+              <button type="button" class="ops-secondary-btn" id="opsOpenOutagesModalBtn">
+                <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 14 14"/></svg>
+                <span>View Full Outage Log</span>
+              </button>
+            </div>
+          </div>
+
+          <div class="ops-agg-cards-grid" id="opsAggCardsGrid">
+            <!-- Dynamically populated via app.js -->
+          </div>
+        </section>
+
+        <!-- Bottom Quick Jump Bar -->
+        <section class="ops-bottom-bar">
+          <div class="ops-bottom-left">
+            <span class="ops-bottom-label">Quick Charger Investigation:</span>
+            <div class="ops-jump-input-group">
+              <input type="text" id="opsDirectSerialInput" placeholder="Enter Serial Number (e.g. TACW2244723S0930)" autocomplete="off" spellcheck="false" />
+              <button type="button" id="opsDirectJumpBtn" class="primary">
+                <span>Open Dashboard</span>
+                <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="9 18 15 12 9 6"/></svg>
+              </button>
+            </div>
+          </div>
+
+          <div class="ops-bottom-right">
+            <button type="button" id="opsBottomBackBtn" class="back-to-fleet-btn">
+              <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="15 18 9 12 15 6"/></svg>
+              <span>Back to Charging Stations List</span>
+            </button>
+          </div>
+        </section>
+      </main>
+
+      <!-- Floating Time Selection Toolbar (Charger Dashboard View Only) -->
+      <aside id="floatingTimeToolbar" class="floating-time-toolbar" hidden aria-label="Floating timeline controls">
+        <!-- Active Window Summary Chip -->
+        <div class="floating-time-summary" id="floatingTimeSummary" title="Active time window (click to expand if minimized)">
+          <span class="floating-time-icon">
+            <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2.2"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 14 14"/></svg>
+          </span>
+          <span class="floating-widget-pill" id="floatingWidgetPill">Connector 1</span>
+          <span class="floating-time-label" id="floatingTimeLabel">Past 7 days</span>
+          <span class="floating-duration-badge" id="floatingDurationBadge">7d 0h</span>
+        </div>
+
+        <div class="floating-time-divider"></div>
+
+        <!-- Quick Preset Chips -->
+        <div class="floating-time-presets" id="floatingTimePresets">
+          <button type="button" class="floating-preset-chip" data-ms="900000" title="Past 15 minutes">15m</button>
+          <button type="button" class="floating-preset-chip" data-ms="3600000" title="Past 1 hour">1h</button>
+          <button type="button" class="floating-preset-chip" data-ms="14400000" title="Past 4 hours">4h</button>
+          <button type="button" class="floating-preset-chip" data-ms="86400000" title="Past 1 day">1d</button>
+          <button type="button" class="floating-preset-chip" data-ms="259200000" title="Past 3 days">3d</button>
+          <button type="button" class="floating-preset-chip active" data-ms="604800000" title="Past 7 days">7d</button>
+          <button type="button" class="floating-preset-chip" data-ms="1209600000" title="Past 14 days">14d</button>
+          <button type="button" class="floating-preset-chip" data-ms="2592000000" title="Past 30 days">30d</button>
+        </div>
+
+        <div class="floating-time-divider"></div>
+
+        <!-- Actions: Custom range jump, Reset, Refresh, Minimize -->
+        <div class="floating-time-actions">
+          <button type="button" class="floating-time-action-btn" id="floatingTimeScrollToPanel" title="Jump to full date & time range picker">
+            <svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="4" width="18" height="18" rx="2" ry="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/></svg>
+            <span>Custom</span>
+          </button>
+          <button type="button" class="floating-time-action-btn" id="floatingTimeReset" title="Reset window to default 7 days">
+            <span>Reset</span>
+          </button>
+          <button type="button" class="floating-time-refresh-btn" id="floatingTimeRefresh" title="Refresh events for active window">
+            <svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2"><path d="M21.5 2v6h-6M21.34 15.57a10 10 0 1 1-.57-8.38l5.67-5.67"/></svg>
+          </button>
+          <button type="button" class="floating-time-minimize-btn" id="floatingTimeMinimize" title="Minimize/expand floating toolbar">
+            <svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="6 9 12 15 18 9"/></svg>
+          </button>
+        </div>
+      </aside>
+
+      <p class="designer-note">
+        <svg class="inline-toyota-emblem" viewBox="74.7 74.7 224 224" width="13" height="13" fill="currentColor" aria-hidden="true">
+          <path d="M224,137.8c-10.4-3.3-23.3-5.3-37.4-5.3c-14,0-27,2-37.4,5.3c-27.6,8.9-46.6,27.3-46.6,48.7 c0,30,37.6,54.3,84,54.3c46.4,0,84-24.3,84-54.3C270.7,165.2,251.7,146.7,224,137.8 M186.7,217.5c-6.9,0-12.6-13.6-12.9-30.7c4.2,0.4,8.5,0.6,12.9,0.6c4.4,0,8.7-0.2,12.9-0.6C199.2,203.9,193.6,217.5,186.7,217.5 M174.6,173.4c1.9-12,6.6-20.5,12-20.5c5.5,0,10.1,8.5,12,20.5c-3.8,0.3-7.9,0.5-12,0.5C182.5,173.9,178.5,173.7,174.6,173.4 M206.1,172.5c-2.8-18.8-10.4-32.4-19.4-32.4c-9,0-16.6,13.5-19.4,32.4c-17.1-2.7-29-8.7-29-15.8c0-9.5,21.7-17.2,48.4-17.2c26.7,0,48.4,7.7,48.4,17.2 C235,163.7,223.1,169.8,206.1,172.5 M114.9,184.5c0-9.2,3.5-17.8,9.7-25.2c-0.1,0.5-0.1,1-0.1,1.6c0,11.6,17.4,21.4,41.6,25 c0,0.9,0,1.8,0,2.6c0,21.5,6,39.7,14.2,46C143.7,232.3,114.9,210.7,114.9,184.5 M193,234.5c8.2-6.3,14.2-24.5,14.2-46c0-0.9,0-1.8,0-2.6c24.2-3.6,41.6-13.5,41.6-25c0-0.5,0-1-0.1-1.6c6.2,7.4,9.7,16,9.7,25.2C258.4,210.7,229.6,232.3,193,234.5"/>
+        </svg>
+        <span>Toyota Motor Europe · Designed by Sagiad Madadian | 2026</span>
+      </p>
+    </div>

@@ -1,0 +1,60 @@
+# See https://docs.github.com/get-started/getting-started-with-git/ignoring-files for more about ignoring files.
+
+# Compiled output
+/dist
+/tmp
+/out-tsc
+/bazel-out
+/build/
+/build-dist/
+/ChargerDashboardAngular.spec
+/Charger-Dashboard-Angular-output.md
+/Charger-Dashboard-Angular-output.txt
+/ARCHITECTURE_ENHANCEMENT_PLAN.md
+
+# Node
+/node_modules
+npm-debug.log
+yarn-error.log
+
+# IDEs and editors
+.idea/
+.project
+.classpath
+.c9/
+*.launch
+.settings/
+*.sublime-workspace
+
+# Visual Studio Code
+.vscode/
+.history/*
+
+# Miscellaneous
+/.angular/cache
+.sass-cache/
+/connect.lock
+/coverage
+/libpeerconnection.log
+testem.log
+/typings
+__screenshots__/
+
+# Python runtime artifacts
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.venv/
+venv/
+
+# Local credentials, session state, and logs
+.env
+.env.*
+!.env.example
+/server/tme_session_token*.json
+/server/tme_token_bridge*.log
+/server/serial_history.json
+
+# System files
+.DS_Store
+Thumbs.db
