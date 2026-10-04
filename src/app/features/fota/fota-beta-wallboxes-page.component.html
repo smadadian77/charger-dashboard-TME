@@ -1,0 +1,152 @@
+<section class="fota-page" aria-labelledby="fotaWallboxesHeading">
+  <header class="fota-page-heading">
+    <div>
+      <p class="fota-eyebrow">BETA POOL</p>
+      <h1 id="fotaWallboxesHeading">Beta wallboxes</h1>
+    </div>
+    <span class="fota-result-count" aria-live="polite">{{ totalItems().toLocaleString() }} wallboxes</span>
+  </header>
+
+  <section class="fota-membership-panel" aria-labelledby="membershipHeading">
+    <div>
+      <h2 id="membershipHeading">Check beta-pool membership</h2>
+      <p>Membership is read-only here. Add/remove actions remain gated until a local mutation target is configured.</p>
+    </div>
+    <form class="fota-membership-form" [formGroup]="membershipForm" (ngSubmit)="checkMembership()">
+      <label>
+        <span>Serial number</span>
+        <input formControlName="serialNumber" type="text" autocomplete="off" spellcheck="false" placeholder="Enter serial number" />
+      </label>
+      <button class="fota-primary-button" type="submit" [disabled]="membershipLoading()">
+        {{ membershipLoading() ? 'Checking...' : 'Check' }}
+      </button>
+    </form>
+    @if (membershipResult()) {
+      <p class="fota-inline-result" role="status" aria-live="polite">{{ membershipResult() }}</p>
+    }
+    @if (membershipError()) {
+      <p class="fota-inline-error" role="alert">{{ membershipError() }}</p>
+    }
+    @if (mutationSuccess()) {
+      <p class="fota-inline-result" role="status" aria-live="polite">{{ mutationSuccess() }}</p>
+    }
+  </section>
+
+  @if (!mutationCapabilities()?.enabled) {
+    <p class="fota-safety-note" role="status">Beta-pool changes are disabled. Configure a local loopback mutation mock to enable them.</p>
+  }
+
+  <form class="fota-filter-bar" [formGroup]="filters" (ngSubmit)="applyFilters()">
+    <label>
+      <span>Serial number</span>
+      <input type="search" formControlName="serialNumber" placeholder="Filter serial" />
+    </label>
+    <label>
+      <span>Model</span>
+      <select formControlName="model">
+        <option value="">All models</option>
+        @for (model of modelOptions(); track model) { <option [value]="model">{{ model }}</option> }
+      </select>
+    </label>
+    <label>
+      <span>Version</span>
+      <select formControlName="version">
+        <option value="">All versions</option>
+        @for (version of versionOptions(); track version) { <option [value]="version">{{ version }}</option> }
+      </select>
+    </label>
+    <label>
+      <span>Status</span>
+      <select formControlName="status">
+        <option value="">All statuses</option>
+        @for (status of statusOptions(); track status) { <option [value]="status">{{ status }}</option> }
+      </select>
+    </label>
+    <label>
+      <span>Country</span>
+      <select formControlName="countryIds" multiple size="3">
+        @for (countryId of countryOptions(); track countryId) { <option [value]="countryId">{{ displayCountry(countryId) }}</option> }
+      </select>
+    </label>
+    <div class="fota-filter-actions">
+      <button class="fota-primary-button" type="submit">Apply</button>
+      <button class="fota-secondary-button" type="button" (click)="resetFilters()">Reset</button>
+    </div>
+  </form>
+
+  @if (metadataError()) {
+    <p class="fota-inline-error" role="status">Some filter options could not be loaded.</p>
+  }
+
+  @if (loading()) {
+    <p class="fota-state" role="status" aria-live="polite">Loading beta wallboxes...</p>
+  } @else if (error()) {
+    <p class="fota-state fota-error" role="alert">{{ error() }}</p>
+  } @else if (wallboxes().length === 0) {
+    <p class="fota-state" role="status">No beta wallboxes match these filters.</p>
+  } @else {
+    <div class="fota-table-scroll">
+      <table class="fota-table">
+        <thead>
+          <tr>
+            <th scope="col">Serial Number</th>
+            <th scope="col">Model</th>
+            <th scope="col">Version</th>
+            <th scope="col">Status</th>
+            <th scope="col">Country</th>
+            <th scope="col">Beta pool</th>
+          </tr>
+        </thead>
+        <tbody>
+          @for (item of wallboxes(); track item.serialNumber) {
+            <tr>
+              <td class="fota-mono">{{ item.serialNumber }}</td>
+              <td>{{ item.model || 'N/A' }}</td>
+              <td>{{ item.version || 'N/A' }}</td>
+              <td><span class="fota-status" [class.is-disconnected]="item.connectors?.[0]?.status === 'Disconnected'">{{ item.connectors?.[0]?.status || 'N/A' }}</span></td>
+              <td>{{ displayCountry(item.countryId) }}</td>
+              <td>
+                <button class="fota-secondary-button" type="button" [disabled]="!mutationCapabilities()?.enabled" [attr.title]="mutationCapabilities()?.enabled ? 'Change beta-pool membership' : 'Mutation target is not configured'" (click)="requestPoolMutation(item)">
+                  {{ item.beta ? 'Remove' : 'Add' }}
+                </button>
+              </td>
+            </tr>
+          }
+        </tbody>
+      </table>
+    </div>
+    <nav class="fota-pagination" aria-label="Beta wallbox pages">
+      <label>
+        <span>Items per page</span>
+        <select [value]="query.value.size" (change)="setPageSize($event)">
+          <option value="5">5</option><option value="10">10</option><option value="25">25</option><option value="50">50</option>
+        </select>
+      </label>
+      <span class="fota-page-range" role="status" aria-live="polite">{{ rangeStart() }} – {{ rangeEnd() }} of {{ totalItems() }}</span>
+      <div class="fota-page-buttons">
+        <button class="fota-secondary-button" type="button" [disabled]="query.value.page === 0" (click)="changePage(-1)">Previous</button>
+        <span>Page {{ currentPage() }} of {{ pageCount() }}</span>
+        <button class="fota-secondary-button" type="button" [disabled]="query.value.page >= pageCount() - 1" (click)="changePage(1)">Next</button>
+      </div>
+    </nav>
+  }
+</section>
+
+<dialog #betaPoolMutationDialog class="fota-detail-dialog" aria-labelledby="betaPoolMutationHeading" (close)="onPoolMutationDialogClosed()">
+  <header class="fota-detail-heading">
+    <h2 id="betaPoolMutationHeading">Confirm beta-pool change</h2>
+    <button class="fota-icon-button" type="button" aria-label="Cancel beta-pool change" [disabled]="mutationLoading()" (click)="closePoolMutationDialog()">Cancel</button>
+  </header>
+  @if (pendingMutation(); as mutation) {
+    <p>{{ mutation.add ? 'Add' : 'Remove' }} {{ mutation.serialNumber }} {{ mutation.add ? 'to' : 'from' }} the beta pool?</p>
+  }
+  <p class="fota-safety-note">This can only reach the configured loopback mock target; Toyota hosts are blocked by the backend.</p>
+  @if (mutationError()) {
+    <p class="fota-state fota-error" role="alert">{{ mutationError() }}</p>
+  }
+  <div class="fota-filter-actions">
+    <button class="fota-primary-button" type="button" [disabled]="mutationLoading() || !mutationCapabilities()?.enabled" (click)="confirmPoolMutation()">
+      {{ mutationLoading() ? 'Sending...' : 'Confirm' }}
+    </button>
+  </div>
+</dialog>

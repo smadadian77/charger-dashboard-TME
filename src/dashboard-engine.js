@@ -308,12 +308,12 @@ function isTokenExpired(token) {
 
   const payload = decodeJwtPayload(token);
   if (!payload || payload.exp === undefined || payload.exp === null) {
-    return false;
+    return true;
   }
 
   const expSeconds = Number(payload.exp);
   if (!Number.isFinite(expSeconds)) {
-    return false;
+    return true;
   }
 
   return expSeconds <= Math.floor(Date.now() / 1000) + 30;
@@ -329,16 +329,23 @@ function isTmeJwtToken(token) {
     return false;
   }
 
-  const audience = payload.aud;
-  if (audience === '00000003-0000-0000-c000-000000000000' || audience === 'https://graph.microsoft.com') {
+  const audiences = Array.isArray(payload.aud) ? payload.aud : [payload.aud];
+  if (audiences.some((audience) => audience === '00000003-0000-0000-c000-000000000000' || audience === 'https://graph.microsoft.com')) {
     return false;
   }
 
-  return Boolean(payload.exp || payload.iat);
+  const allowedAudiences = {
+    prod: ['635b40b9-e2a6-4aa1-b091-4d293d7bf80d'],
+    acc: ['999bf820-34e8-4078-9908-a9b99ea0fbce', '769328e8-3732-45f2-9724-34dba356564e'],
+    prev: ['999bf820-34e8-4078-9908-a9b99ea0fbce', '769328e8-3732-45f2-9724-34dba356564e'],
+  }[state.currentEnv || 'prod'];
+  return Number.isFinite(Number(payload.exp))
+    && Number(payload.exp) > Math.floor(Date.now() / 1000) + 30
+    && audiences.some((audience) => allowedAudiences.includes(audience));
 }
 
 function isAuthTokenError(error, statusCode) {
-  if (statusCode === 401 || statusCode === 403) {
+  if (statusCode === 401) {
     return true;
   }
   const text = String(error || '').toLowerCase();
@@ -346,7 +353,7 @@ function isAuthTokenError(error, statusCode) {
   if (/not\s*found|404|unknown\s*charger|no\s*record|serial/i.test(text)) {
     return false;
   }
-  // True authentication token failure patterns
+  // A forbidden response can be a role restriction; only explicit auth failures trigger re-login.
   return /jwt\s*expired|bearer\s*token\s*expired|token\s*expired|token\s*signature|unauthorized|pkey:verify/i.test(text);
 }
 
@@ -366,7 +373,7 @@ function formatApiError(result) {
   }
 
   const text = `${message || ''} ${result && result.message ? result.message : ''}`.toLowerCase();
-  if (result?.authError || result?.statusCode === 401 || result?.statusCode === 403 || /jwt\s*expired|bearer\s*token\s*expired|token\s*expired|pkey:verify/i.test(text)) {
+  if (result?.authError || result?.statusCode === 401 || /jwt\s*expired|bearer\s*token\s*expired|token\s*expired|pkey:verify/i.test(text)) {
     return 'TME session token is expired or unauthorized.';
   }
 
@@ -6901,7 +6908,7 @@ async function executeSupportOperation() {
     httpStatus = result.httpStatus != null && Number.isFinite(responseHttpStatus) ? responseHttpStatus : response.status;
     status = result.status || (response.ok ? 'ACCEPTED' : 'FAILED');
     message = redactSupportOperationText(result.message || `Support API returned HTTP ${httpStatus}.`, context, parameters);
-    if (httpStatus === 401 || httpStatus === 403) {
+    if (httpStatus === 401) {
       void handleInvalidTokenAndRetry();
     }
 
@@ -8026,13 +8033,20 @@ function applyTokenPillDisplay({ env, valid, expired, hasToken, minutesRemaining
 }
 
 let _tokenHealthChecking = false;
+function currentTokenApp() {
+  return __fotaHeaderOnly ? 'fota' : 'charger';
+}
+
 async function checkLiveTokenHealth() {
   if (_tokenHealthChecking) return;
   _tokenHealthChecking = true;
   const env = (state.currentEnv || 'prod').toLowerCase();
+  const app = currentTokenApp();
   try {
-    const res = await fetch(dashboardApiUrl(`/api/token-status?env=${encodeURIComponent(env)}`));
+    const params = new URLSearchParams({ env, app });
+    const res = await fetch(dashboardApiUrl(`/api/token-status?${params.toString()}`));
     const data = await res.json();
+    if (env !== state.currentEnv || data?.env !== env || data?.app !== app) return;
     if (data && data.ok) {
       if (data.valid && !state.token) {
         await loadStoredTokenFromLocalBridge();
@@ -8055,6 +8069,9 @@ function setToken(token) {
   const status = valid ? 'Session valid' : expired ? 'Session expired' : 'Session required';
   const env = (state.currentEnv || 'prod').toLowerCase();
   state.token = valid ? value : '';
+  if (valid) {
+    window.dispatchEvent(new CustomEvent('dashboard-session-ready', { detail: { environment: env } }));
+  }
 
   let minutesLeft = 0;
   if (valid) {
@@ -8092,27 +8109,33 @@ function clearToken() {
   setToken('');
 }
 
-async function clearSavedToken() {
-  const env = (state.currentEnv || 'prod').toLowerCase();
+async function clearSavedToken(environment = state.currentEnv) {
+  const env = String(environment || 'prod').toLowerCase();
+  const params = new URLSearchParams({ env, app: currentTokenApp() });
   try {
-    await fetch(dashboardApiUrl(`/api/session-token?env=${encodeURIComponent(env)}`), { method: 'DELETE' });
+    await fetch(dashboardApiUrl(`/api/session-token?${params.toString()}`), { method: 'DELETE' });
   } catch (error) {
     // Ignore cleanup errors; the UI token field is still cleared.
   }
 
-  setToken('');
+  if (env === state.currentEnv) setToken('');
 }
 
-async function loadStoredTokenFromLocalBridge() {
-  const env = (state.currentEnv || 'prod').toLowerCase();
+async function loadStoredTokenFromLocalBridge({ environment = state.currentEnv, differentFrom = '' } = {}) {
+  const env = String(environment || 'prod').toLowerCase();
+  const app = currentTokenApp();
   try {
-    const response = await fetch(dashboardApiUrl(`/api/session-token?env=${encodeURIComponent(env)}`), { method: 'GET' });
+    const params = new URLSearchParams({ env, app });
+    const response = await fetch(dashboardApiUrl(`/api/session-token?${params.toString()}`), { method: 'GET' });
     const result = await response.json();
+    if (env !== state.currentEnv || result?.env !== env || result?.app !== app) return false;
     if (result && result.ok && result.token) {
       if (isTokenExpired(result.token) || !isTmeJwtToken(result.token)) {
-        await clearSavedToken();
         setStatus(`Saved TME token for ${env.toUpperCase()} is expired or invalid. Refreshing session automatically...`, 'warning');
         await triggerAutoTokenCapture();
+        return false;
+      }
+      if (differentFrom && result.token === differentFrom) {
         return false;
       }
 
@@ -8139,23 +8162,26 @@ async function handleInvalidTokenAndRetry() {
   }
 
   state.tokenRefreshInProgress = true;
+  if (!__fotaHeaderOnly) __dashboardNeedsInitialTokenRefresh = false;
 
   try {
-    await clearSavedToken();
+    const environment = state.currentEnv;
+    if (!state.token) await loadStoredTokenFromLocalBridge({ environment });
+    const rejectedToken = String(state.token || '').replace(/^Bearer\s+/i, '').trim();
     setStatus('The saved TME token was rejected. Refreshing the TME session automatically...', 'warning');
 
-    const started = await triggerAutoTokenCapture();
+    const started = await triggerAutoTokenCapture({ environment, force: true });
     if (!started) {
       setStatus('The TME token refresh could not be started automatically. Please reload the page once the dashboard is signed in.', 'warning');
       return;
     }
 
-    const tokenLoaded = await waitForAutoToken();
+    const tokenLoaded = await waitForAutoToken(390000, { environment, differentFrom: rejectedToken });
     if (tokenLoaded) {
-      const loaded = await loadStoredTokenFromLocalBridge();
+      const loaded = await loadStoredTokenFromLocalBridge({ environment, differentFrom: rejectedToken });
       if (loaded) {
         setStatus('Fresh TME token loaded. Reloading events automatically...', 'success');
-        await fetchEvents();
+        refreshDashboardAfterTokenReady();
       }
       return;
     }
@@ -8777,10 +8803,13 @@ function loadSample() {
   setDefaultWindow();
 }
 
-async function triggerAutoTokenCapture() {
-  const env = (state.currentEnv || 'prod').toLowerCase();
+async function triggerAutoTokenCapture({ environment = state.currentEnv, force = false, noBrowser = false } = {}) {
+  const env = String(environment || 'prod').toLowerCase();
+  const params = new URLSearchParams({ env, app: currentTokenApp() });
+  if (force) params.set('force', 'true');
+  if (noBrowser) params.set('noBrowser', '1');
   try {
-    const response = await fetch(dashboardApiUrl(`/api/refresh-tme-token?env=${encodeURIComponent(env)}`), { method: 'GET' });
+    const response = await fetch(dashboardApiUrl(`/api/refresh-tme-token?${params.toString()}`), { method: 'POST' });
     const result = await response.json();
     if (result && result.ok) {
       setStatus(`Refreshing TME session for ${env.toUpperCase()} automatically.`, 'info');
@@ -8793,11 +8822,12 @@ async function triggerAutoTokenCapture() {
   return false;
 }
 
-async function waitForAutoToken(timeoutMs = 120000) {
+async function waitForAutoToken(timeoutMs = 390000, { environment = state.currentEnv, differentFrom = '' } = {}) {
   const startedAt = Date.now();
 
   while (Date.now() - startedAt < timeoutMs) {
-    const loaded = await loadStoredTokenFromLocalBridge();
+    if (environment !== state.currentEnv) return false;
+    const loaded = await loadStoredTokenFromLocalBridge({ environment, differentFrom });
     if (loaded) {
       return true;
     }
@@ -8831,16 +8861,16 @@ async function autoLoadSavedTokenAndSearch() {
   setStatus('Automatic token refresh is in progress; sign in to TME and reload the page when the session is ready.', 'warning');
 }
 
-const TME_ENV_URLS = {
-  prod: 'https://tme-ev-chargingplatform-charger-dashboard-webapp.toyota-europe.com/wallbox/list',
-  acc: 'https://tme-ev-chargingplatform-charger-dashboard-webapp-acc.toyota-europe.com/wallbox/list',
-  prev: 'https://tme-ev-chargingplatform-charger-dashboard-webapp-prev.toyota-europe.com/wallbox/list',
-};
 let currentAuthWindow = null;
 
 async function retryLoginFromScratch() {
+  if (state.tokenRefreshInProgress) return;
+  state.tokenRefreshInProgress = true;
   const env = (state.currentEnv || 'prod').toLowerCase();
   const envUpper = env.toUpperCase();
+  if (!__fotaHeaderOnly) __dashboardNeedsInitialTokenRefresh = false;
+  if (!state.token) await loadStoredTokenFromLocalBridge({ environment: env });
+  const tokenBeforeRefresh = String(state.token || '').replace(/^Bearer\s+/i, '').trim();
   const refreshBtn = document.getElementById('globalTokenRefresh');
   const refreshIcon = refreshBtn?.querySelector('svg');
   if (refreshBtn) refreshBtn.classList.add('rotating');
@@ -8855,13 +8885,13 @@ async function retryLoginFromScratch() {
     capturing: true,
   });
 
-  const targetUrl = TME_ENV_URLS[env] || TME_ENV_URLS.prod;
+  const app = currentTokenApp();
   let openedDirectly = false;
   try {
     if (!currentAuthWindow || currentAuthWindow.closed) {
-      currentAuthWindow = window.open(targetUrl, '_blank');
+      currentAuthWindow = window.open('about:blank', '_blank');
     } else {
-      currentAuthWindow.location.href = targetUrl;
+      currentAuthWindow.location.href = 'about:blank';
       currentAuthWindow.focus();
     }
     if (currentAuthWindow && !currentAuthWindow.closed) {
@@ -8872,13 +8902,24 @@ async function retryLoginFromScratch() {
   }
 
   setStatus(`Initiating fresh login for ${envUpper}... A browser tab has been opened for authentication.`, 'warning');
-  await clearSavedToken();
-
-  const noBrowserQuery = openedDirectly ? '&noBrowser=1' : '&openBrowser=1';
+  const noBrowserQuery = `&app=${encodeURIComponent(app)}&noBrowser=1${openedDirectly ? '' : '&openBrowser=1'}`;
   try {
-    const res = await fetch(dashboardApiUrl(`/api/refresh-tme-token?force=true&env=${encodeURIComponent(env)}${noBrowserQuery}`), { method: 'GET' });
+    const res = await fetch(dashboardApiUrl(`/api/refresh-tme-token?force=true&env=${encodeURIComponent(env)}${noBrowserQuery}`), { method: 'POST' });
     const data = await res.json();
-    if (!openedDirectly && data && data.url) {
+    if (openedDirectly && currentAuthWindow && !currentAuthWindow.closed && data?.url) {
+      currentAuthWindow.location.href = data.url;
+    }
+    if (!data?.ok) {
+      setStatus(data?.message || `Could not start ${app.toUpperCase()} authentication for ${envUpper}.`, 'error');
+      if (currentAuthWindow && !currentAuthWindow.closed) currentAuthWindow.close();
+      currentAuthWindow = null;
+      if (refreshBtn) refreshBtn.classList.remove('rotating');
+      if (refreshIcon) refreshIcon.style.animation = '';
+      await checkLiveTokenHealth();
+      state.tokenRefreshInProgress = false;
+      return;
+    }
+    if (!openedDirectly && data && data.url && !data.browserOpened) {
       try {
         currentAuthWindow = window.open(data.url, '_blank');
       } catch (e) {
@@ -8890,10 +8931,11 @@ async function retryLoginFromScratch() {
     if (refreshBtn) refreshBtn.classList.remove('rotating');
     if (refreshIcon) refreshIcon.style.animation = '';
     await checkLiveTokenHealth();
+    state.tokenRefreshInProgress = false;
     return;
   }
 
-  const tokenLoaded = await waitForAutoToken(180000);
+  const tokenLoaded = await waitForAutoToken(390000, { environment: env, differentFrom: tokenBeforeRefresh });
   if (refreshBtn) refreshBtn.classList.remove('rotating');
   if (refreshIcon) refreshIcon.style.animation = '';
 
@@ -8925,6 +8967,7 @@ async function retryLoginFromScratch() {
     await checkLiveTokenHealth();
     setStatus(`Fresh login timed out for ${envUpper}. Please sign in in the opened browser tab and click Refresh again.`, 'warning');
   }
+  state.tokenRefreshInProgress = false;
 }
 
 /* ========================================================
@@ -9544,6 +9587,20 @@ async function setEnvironment(env) {
   state.token = ''; // Clear prior environment token immediately from active memory
 
   updateEnvironmentUI();
+  if (__fotaHeaderOnly) {
+    window.dispatchEvent(new CustomEvent('dashboard-environment-change', { detail: { environment: normalized } }));
+    const syncStatus = document.getElementById('liveDataSyncStatus');
+    if (syncStatus) {
+      syncStatus.textContent = `${normalized.toUpperCase()} FOTA`;
+      syncStatus.title = `Firmware management environment: ${normalized.toUpperCase()}`;
+    }
+    await checkLiveTokenHealth();
+    if (!await loadStoredTokenFromLocalBridge()) {
+      await retryLoginFromScratch();
+    }
+    return;
+  }
+
   updateDataSyncProvenance('syncing', `Connecting to ${normalized.toUpperCase()}...`);
 
   // Reset KPI cards to environment-specific loading placeholders immediately
@@ -10088,6 +10145,9 @@ async function fetchFleetWallboxes(page = 0) {
     const data = await res.json();
 
     if (!data || !data.ok) {
+      if (res.status === 401 || data?.authError) {
+        window.dispatchEvent(new CustomEvent('dashboard-token-rejected', { detail: { environment: env } }));
+      }
       throw new Error(data && data.message ? data.message : 'Failed to fetch charging stations list');
     }
 
@@ -10542,6 +10602,134 @@ function applyTheme(theme) {
   });
 }
 
+let __sharedTopbarInitialized = false;
+let __fotaHeaderOnly = false;
+let __dashboardNeedsInitialTokenRefresh = false;
+
+function refreshDashboardAfterTokenReady() {
+  if (__fotaHeaderOnly || !state.token) return;
+  loadFleetMetadata();
+  if (state.currentView === 'charger') {
+    const serialNumber = document.getElementById('serialNumber')?.value?.trim();
+    if (serialNumber) openChargerDashboard(serialNumber);
+  } else if (state.currentView === 'ops') {
+    fetchOpsAnalytics(state.currentEnv, true);
+  } else {
+    fetchOutages();
+    fetchFleetWallboxes(0);
+  }
+}
+
+function initializeSharedTopbar({ fotaOnly = false } = {}) {
+  if (__sharedTopbarInitialized || !document.getElementById('globalTokenRefresh')) return;
+  __sharedTopbarInitialized = true;
+  __fotaHeaderOnly = fotaOnly;
+  window.addEventListener('dashboard-session-ready', () => {
+    if (__fotaHeaderOnly || !__dashboardNeedsInitialTokenRefresh) return;
+    __dashboardNeedsInitialTokenRefresh = false;
+    refreshDashboardAfterTokenReady();
+  });
+  window.addEventListener('dashboard-token-rejected', (event) => {
+    if (event.detail?.environment !== state.currentEnv) return;
+    void handleInvalidTokenAndRetry();
+  });
+
+  if (fotaOnly) {
+    const savedEnvironment = localStorage.getItem('wallbox_env');
+    state.currentEnv = ['prod', 'acc', 'prev'].includes(savedEnvironment) ? savedEnvironment : 'prod';
+  }
+
+  applyTheme(localStorage.getItem('wallboxTheme') === 'dark' ? 'dark' : 'light');
+  document.querySelectorAll('.theme-option').forEach((button) => {
+    button.addEventListener('click', () => applyTheme(button.dataset.theme));
+  });
+
+  const clock = document.getElementById('liveHeaderClock');
+  if (clock) {
+    const updateClock = () => {
+      clock.textContent = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+    };
+    updateClock();
+    window.setInterval(updateClock, 1000);
+  }
+  checkLiveTokenHealth();
+  window.setInterval(checkLiveTokenHealth, 3500);
+
+  document.getElementById('backToFleetBtn')?.addEventListener('click', openFleetView);
+  document.getElementById('topbarToyotaBrand')?.addEventListener('click', (event) => {
+    event.preventDefault();
+    if (__fotaHeaderOnly) {
+      window.location.assign('/');
+    } else {
+      openFleetView();
+    }
+  });
+
+  const supportNavItem = document.getElementById('topbarSupportNavItem');
+  const supportLink = document.getElementById('topbarSupportLink');
+  if (supportLink && supportNavItem) {
+    supportLink.addEventListener('click', (event) => {
+      event.preventDefault();
+      const isExpanded = supportLink.getAttribute('aria-expanded') === 'true';
+      supportLink.setAttribute('aria-expanded', String(!isExpanded));
+      supportNavItem.classList.toggle('is-open', !isExpanded);
+    });
+    document.addEventListener('click', (event) => {
+      if (!supportNavItem.contains(event.target)) {
+        supportLink.setAttribute('aria-expanded', 'false');
+        supportNavItem.classList.remove('is-open');
+      }
+    });
+    document.addEventListener('keydown', (event) => {
+      if (event.key === 'Escape' && supportNavItem.classList.contains('is-open')) {
+        supportLink.setAttribute('aria-expanded', 'false');
+        supportNavItem.classList.remove('is-open');
+        supportLink.focus();
+      }
+    });
+  }
+
+  document.getElementById('topbarOpsBtn')?.addEventListener('click', (event) => {
+    event.preventDefault();
+    if (__fotaHeaderOnly) {
+      window.location.assign('/#analytics');
+    } else if (state.currentView === 'ops') {
+      openFleetView();
+    } else {
+      openOpsAnalyticsView();
+    }
+  });
+
+  document.getElementById('globalTokenRefresh')?.addEventListener('click', async (event) => {
+    event.stopPropagation();
+    await retryLoginFromScratch();
+  });
+  document.getElementById('globalTokenPill')?.addEventListener('click', async (event) => {
+    if (event.target.closest('#globalTokenRefresh')) return;
+    await retryLoginFromScratch();
+  });
+
+  document.querySelectorAll('.env-pill').forEach((button) => {
+    button.addEventListener('click', (event) => {
+      event.preventDefault();
+      const targetEnvironment = button.dataset.env;
+      if (targetEnvironment && targetEnvironment !== state.currentEnv) {
+        setEnvironment(targetEnvironment);
+      }
+    });
+  });
+
+  updateEnvironmentUI();
+  if (fotaOnly) {
+    const syncStatus = document.getElementById('liveDataSyncStatus');
+    if (syncStatus) {
+      syncStatus.textContent = `${state.currentEnv.toUpperCase()} FOTA`;
+      syncStatus.title = `Firmware management environment: ${state.currentEnv.toUpperCase()}`;
+    }
+  }
+  initStickyTopbarScroll();
+}
+
 let __dashboardInitialized = false;
 async function startDashboardApp() {
   if (!document.getElementById('globalTokenRefresh')) {
@@ -10549,7 +10737,7 @@ async function startDashboardApp() {
   }
   if (__dashboardInitialized) return;
   __dashboardInitialized = true;
-  applyTheme(localStorage.getItem('wallboxTheme') === 'dark' ? 'dark' : 'light');
+  __dashboardNeedsInitialTokenRefresh = false;
   let overviewResizeFrame = 0;
   window.addEventListener('resize', () => {
     window.cancelAnimationFrame(overviewResizeFrame);
@@ -10557,9 +10745,6 @@ async function startDashboardApp() {
       overviewResizeFrame = 0;
       drawOverview();
     });
-  });
-  document.querySelectorAll('.theme-option').forEach((button) => {
-    button.addEventListener('click', () => applyTheme(button.dataset.theme));
   });
   clearToken();
   setDefaultWindow();
@@ -10781,75 +10966,6 @@ async function startDashboardApp() {
     }
   });
 
-  function initLiveClock() {
-    const clock = document.getElementById('liveHeaderClock');
-    if (!clock) return;
-    const update = () => {
-      const now = new Date();
-      clock.textContent = now.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
-    };
-    update();
-    setInterval(update, 1000);
-
-    // Live continuous token health and countdown check
-    checkLiveTokenHealth();
-    setInterval(checkLiveTokenHealth, 3500);
-  }
-  initLiveClock();
-
-  // Topbar navigation & Toyota brand home link
-  const backToFleetBtn = document.getElementById('backToFleetBtn');
-  if (backToFleetBtn) {
-    backToFleetBtn.addEventListener('click', openFleetView);
-  }
-  const topbarToyotaBrand = document.getElementById('topbarToyotaBrand');
-  if (topbarToyotaBrand) {
-    topbarToyotaBrand.addEventListener('click', (e) => {
-      e.preventDefault();
-      openFleetView();
-    });
-  }
-
-  // Customer Support floating popover interaction & accessibility
-  const supportNavItem = document.getElementById('topbarSupportNavItem');
-  const supportLink = document.getElementById('topbarSupportLink');
-  if (supportLink && supportNavItem) {
-    supportLink.addEventListener('click', (e) => {
-      e.preventDefault();
-      const isExpanded = supportLink.getAttribute('aria-expanded') === 'true';
-      supportLink.setAttribute('aria-expanded', String(!isExpanded));
-      supportNavItem.classList.toggle('is-open', !isExpanded);
-    });
-
-    document.addEventListener('click', (e) => {
-      if (!supportNavItem.contains(e.target)) {
-        supportLink.setAttribute('aria-expanded', 'false');
-        supportNavItem.classList.remove('is-open');
-      }
-    });
-
-    document.addEventListener('keydown', (e) => {
-      if (e.key === 'Escape' && supportNavItem.classList.contains('is-open')) {
-        supportLink.setAttribute('aria-expanded', 'false');
-        supportNavItem.classList.remove('is-open');
-        supportLink.focus();
-      }
-    });
-  }
-
-  // OPS Analytics view triggers
-  const topbarOpsBtn = document.getElementById('topbarOpsBtn');
-  if (topbarOpsBtn) {
-    topbarOpsBtn.addEventListener('click', (e) => {
-      e.preventDefault();
-      if (state.currentView === 'ops') {
-        openFleetView();
-      } else {
-        openOpsAnalyticsView();
-      }
-    });
-  }
-
   const openOpsAnalyticsHeroBtn = document.getElementById('openOpsAnalyticsHeroBtn');
   if (openOpsAnalyticsHeroBtn) {
     openOpsAnalyticsHeroBtn.addEventListener('click', (e) => {
@@ -11017,16 +11133,6 @@ async function startDashboardApp() {
     if (state.fleet.totalPages > 0) fetchFleetWallboxes(state.fleet.totalPages - 1);
   });
 
-  // Global Token Refresh button & pill in topbar - opens login page and refreshes token
-  document.getElementById('globalTokenRefresh')?.addEventListener('click', async (e) => {
-    e.stopPropagation();
-    await retryLoginFromScratch();
-  });
-  document.getElementById('globalTokenPill')?.addEventListener('click', async (e) => {
-    if (e.target.closest('#globalTokenRefresh')) return;
-    await retryLoginFromScratch();
-  });
-
   // Remote Interactions Bar & Confirm Dialog Bindings
   document.getElementById('interactionUnlockBtn')?.addEventListener('click', () => openInteractionConfirm('unlock-connector'));
   document.getElementById('interactionRebootBtn')?.addEventListener('click', () => openInteractionConfirm('reboot'));
@@ -11040,21 +11146,10 @@ async function startDashboardApp() {
     if (strip) strip.hidden = true;
   });
 
-  // Environment Switcher bindings
-  document.querySelectorAll('.env-pill').forEach((btn) => {
-    btn.addEventListener('click', (e) => {
-      e.preventDefault();
-      const targetEnv = btn.dataset.env;
-      if (targetEnv && targetEnv !== state.currentEnv) {
-        setEnvironment(targetEnv);
-      }
-    });
-  });
-
   // Default view is PROD
   state.currentEnv = 'prod';
-  localStorage.setItem('wallbox_env', 'prod');
-  updateEnvironmentUI();
+  localStorage.setItem('wallbox_env', state.currentEnv);
+  initializeSharedTopbar();
 
   // Initialize view state & data
   const urlParams = new URLSearchParams(window.location.search);
@@ -11070,7 +11165,6 @@ async function startDashboardApp() {
   }
 
   setupOutagesControls();
-  initStickyTopbarScroll();
   initFloatingTimeToolbar();
 
   // Attach Smart Serial Autocomplete & Fuzzy Typo Suggestion to all 4 serial input fields
@@ -11101,9 +11195,26 @@ async function startDashboardApp() {
 
   // Load fleet metadata in background without blocking wallbox rendering
   loadFleetMetadata();
+  if (!tokenLoaded) {
+    if (state.token) refreshDashboardAfterTokenReady();
+    else __dashboardNeedsInitialTokenRefresh = true;
+  }
 }
 
 if (typeof window !== 'undefined') {
+  window.initToyotaDashboardHeader = function() {
+    if (__sharedTopbarInitialized) return;
+    state.currentEnv = 'prod';
+    localStorage.setItem('wallbox_env', state.currentEnv);
+    initializeSharedTopbar({ fotaOnly: true });
+    window.dispatchEvent(new CustomEvent('dashboard-environment-change', { detail: { environment: 'prod' } }));
+    void (async () => {
+      if (!await loadStoredTokenFromLocalBridge()) {
+        await triggerAutoTokenCapture();
+      }
+    })();
+  };
+
   window.initToyotaDashboard = function() {
     __dashboardInitialized = false;
     startDashboardApp();

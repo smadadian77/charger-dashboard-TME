@@ -28,6 +28,12 @@ ENV_CONFIGS = {
     },
 }
 
+FOTA_WEBAPP_ORIGINS = {
+    "prod": "https://tme-ev-chargingplatform-fota-webapp.toyota-europe.com",
+    "acc": "https://tme-ev-chargingplatform-fota-webapp-acc.toyota-europe.com",
+}
+FOTA_WEBAPP_PATH = "/wallbox/listfo"
+
 TME_API_ORIGIN = ENV_CONFIGS["prod"]["api_host"]
 
 
@@ -40,8 +46,16 @@ def get_env_config(env="prod"):
     return ENV_CONFIGS[normalize_env(env)]
 
 
-def get_token_file(env="prod"):
-    return os.path.join(BASE_DIR, get_env_config(env)["token_file"])
+def normalize_token_app(app="charger"):
+    return "fota" if str(app or "").strip().lower() == "fota" else "charger"
+
+
+def get_token_file(env="prod", app="charger"):
+    filename = get_env_config(env)["token_file"]
+    if normalize_token_app(app) == "fota":
+        name, extension = os.path.splitext(filename)
+        filename = f"{name}_fota{extension}"
+    return os.path.join(BASE_DIR, filename)
 
 
 def get_api_url(path, env="prod"):
@@ -51,4 +65,13 @@ def get_api_url(path, env="prod"):
 
 def get_dashboard_url(env="prod"):
     return f"{get_env_config(env)['webapp_origin']}/wallbox/list"
+
+
+def get_fota_webapp_origin(env="prod"):
+    return FOTA_WEBAPP_ORIGINS.get(normalize_env(env))
+
+
+def get_fota_webapp_url(env="prod"):
+    origin = get_fota_webapp_origin(env)
+    return f"{origin}{FOTA_WEBAPP_PATH}" if origin else None
 

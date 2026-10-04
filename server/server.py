@@ -26,8 +26,10 @@ from backend.config import (
     TME_API_ORIGIN,
     get_api_url,
     get_env_config,
+    get_fota_webapp_url,
     get_token_file,
     normalize_env,
+    normalize_token_app,
 )
 try:
     from backend.config import get_dashboard_url
@@ -44,6 +46,7 @@ from backend.auth import (
     is_token_capture_running,
     is_token_expired,
     read_saved_token,
+    store_captured_token,
     start_token_capture,
     write_saved_token,
 )
@@ -120,6 +123,23 @@ from backend.services.outages_service import (
     compute_ops_analytics,
     get_webapp_origin,
 )
+from backend.services.fota_service import (
+    FotaReadError,
+    get_filter_metadata,
+    get_package,
+    get_wallbox_membership,
+    list_campaigns,
+    list_launched_campaigns,
+    list_launched_campaigns_by_vendor,
+    list_packages,
+    list_wallboxes,
+)
+from backend.services.fota_mutation_service import (
+    FotaMutationError,
+    execute_local_mutation,
+    is_loopback_local_request,
+    mutation_capabilities,
+)
 from backend.services.support_ops_service import (
     SUPPORT_OPERATION_SPECS,
     _build_support_operation_request,
@@ -131,6 +151,9 @@ from backend.services.support_ops_service import (
     _support_response_message,
     _support_response_payload,
 )
+
+TOKEN_CAPTURE_FRESHNESS = {}
+TOKEN_CAPTURE_FRESHNESS_LOCK = threading.Lock()
 
 # Aliases for backward compatibility with existing tests and scripts
 _compute_ops_analytics = compute_ops_analytics
@@ -153,88 +176,63 @@ class AppHandler(BaseHTTPRequestHandler):
         )
         return normalize_env(env)
 
+    def _extract_token_app(self, body_payload=None):
+        parsed = urlparse(getattr(self, "path", ""))
+        params = {key: values[0] for key, values in parse_qs(parsed.query).items() if values}
+        body_payload = body_payload if isinstance(body_payload, dict) else {}
+        return normalize_token_app(body_payload.get("app") or params.get("app", "charger"))
+
     def do_OPTIONS(self):
         self.send_response(204)
         self.send_header("Access-Control-Allow-Origin", "*")
         self.send_header("Access-Control-Allow-Methods", "GET, POST, OPTIONS, DELETE")
-        self.send_header("Access-Control-Allow-Headers", "Content-Type, Authorization, X-Wallbox-Env, X-Method-Override")
+        self.send_header("Access-Control-Allow-Headers", "Content-Type, Authorization, X-Wallbox-Env")
         self.end_headers()
 
     def do_GET(self):
         parsed = urlparse(self.path)
 
+        if parsed.path in {"/api/session-token", "/api/token-status", "/api/refresh-tme-token"}:
+            if not is_loopback_local_request(self.client_address[0], self.headers.get("Origin")):
+                self._send_json({"ok": False, "message": "Token endpoints are restricted to the local application."}, status=403)
+                return
+
         if parsed.path == "/api/health":
             self._send_json({"ok": True, "status": "ready"})
             return
 
+        if parsed.path == "/api/fota/mutation-capabilities":
+            self._send_json({"ok": True, **mutation_capabilities()})
+            return
+
+        if parsed.path.startswith("/api/fota/"):
+            self._proxy_fota_read(parsed)
+            return
+
         if parsed.path == "/api/session-token":
             env = self._extract_env()
-            if self.headers.get("X-Method-Override") == "DELETE":
-                delete_saved_token(env)
-                self._send_json({"ok": True, "env": env, "message": f"Saved token cleared for {env.upper()}."})
-                return
-            token = read_saved_token(env)
+            app = self._extract_token_app()
+            token = read_saved_token(env, app=app)
             self._send_json({
                 "ok": True,
                 "env": env,
+                "app": app,
                 "hasToken": bool(token),
                 "token": token,
-                "capturing": is_token_capture_running(env),
+                "capturing": is_token_capture_running(env, app),
             })
             return
 
         if parsed.path == "/api/token-status":
             env = self._extract_env()
-            status_data = get_token_status(env)
-            status_data["url"] = get_dashboard_url(env)
+            app = self._extract_token_app()
+            status_data = get_token_status(env, app)
+            status_data["url"] = get_fota_webapp_url(env) if app == "fota" else get_dashboard_url(env)
             self._send_json(status_data)
             return
 
         if parsed.path == "/api/refresh-tme-token":
-            env = self._extract_env()
-            url_params = parse_qs(parsed.query)
-            force = url_params.get("force", ["0"])[0].lower() in ("1", "true", "yes")
-            no_browser = url_params.get("noBrowser", ["0"])[0].lower() in ("1", "true", "yes")
-            target_url = get_dashboard_url(env)
-
-            if not force:
-                token = read_saved_token(env)
-                if token and not is_token_expired(token):
-                    self._send_json({
-                        "ok": True,
-                        "env": env,
-                        "message": f"Token already available for {env.upper()}.",
-                        "hasToken": True,
-                        "url": target_url,
-                    })
-                    return
-            else:
-                delete_saved_token(env)
-
-            # Only open OS browser if explicitly requested by user-initiated action
-            open_browser = url_params.get("openBrowser", ["0"])[0].lower() in ("1", "true", "yes")
-            if open_browser and not no_browser:
-                try:
-                    webbrowser.open(target_url)
-                except Exception:
-                    pass
-
-            try:
-                start_token_capture(env, force=force, no_browser=no_browser)
-                self._send_json({
-                    "ok": True,
-                    "env": env,
-                    "url": target_url,
-                    "message": f"Opening TME login page for {env.upper()} ({target_url}). Token capture started...",
-                    "capturing": True,
-                })
-            except Exception as exc:
-                self._send_json({
-                    "ok": False,
-                    "env": env,
-                    "url": target_url,
-                    "message": f"Unable to start the token bridge for {env.upper()}: {exc}",
-                }, status=500)
+            self._send_json({"ok": False, "message": "Use POST to start token capture."}, status=405)
             return
 
         if parsed.path == "/api/wallbox-models":
@@ -284,12 +282,81 @@ class AppHandler(BaseHTTPRequestHandler):
         self._serve_file("index.html")
         return
 
+    def _start_tme_token_capture(self, parsed):
+        env = self._extract_env()
+        app = self._extract_token_app()
+        url_params = parse_qs(parsed.query)
+        force = url_params.get("force", ["0"])[0].lower() in ("1", "true", "yes")
+        no_browser = url_params.get("noBrowser", ["0"])[0].lower() in ("1", "true", "yes")
+        target_url = get_fota_webapp_url(env) if app == "fota" else get_dashboard_url(env)
+        if not target_url:
+            self._send_json({
+                "ok": False,
+                "env": env,
+                "app": app,
+                "message": f"FOTA authentication is not configured for {env.upper()}.",
+            }, status=501)
+            return
+
+        token = read_saved_token(env, app=app)
+        if app == "fota" and not token:
+            force = True
+        min_issued_at = int(time.time()) + 1 if force else 0
+        freshness_key = (env, app)
+        with TOKEN_CAPTURE_FRESHNESS_LOCK:
+            if force:
+                TOKEN_CAPTURE_FRESHNESS[freshness_key] = min_issued_at
+            else:
+                min_issued_at = TOKEN_CAPTURE_FRESHNESS.get(freshness_key, 0)
+
+        if not force and token and not is_token_expired(token):
+            self._send_json({
+                "ok": True,
+                "env": env,
+                "app": app,
+                "message": f"Token already available for {env.upper()} {app.upper()}.",
+                "hasToken": True,
+                "url": target_url,
+            })
+            return
+
+        open_browser = url_params.get("openBrowser", ["0"])[0].lower() in ("1", "true", "yes")
+        browser_opened = False
+        if open_browser:
+            try:
+                browser_opened = bool(webbrowser.open(target_url))
+            except Exception:
+                pass
+
+        try:
+            start_token_capture(env, force=force, no_browser=no_browser, min_issued_at=min_issued_at, app=app)
+            self._send_json({
+                "ok": True,
+                "env": env,
+                "app": app,
+                "url": target_url,
+                "message": f"Opening TME {app.upper()} login page for {env.upper()} ({target_url}). Token capture started...",
+                "capturing": True,
+                "browserOpened": browser_opened,
+            })
+        except Exception:
+            self._send_json({
+                "ok": False,
+                "env": env,
+                "app": app,
+                "message": f"Unable to start the token bridge for {env.upper()}.",
+            }, status=500)
+
     def do_DELETE(self):
         parsed = urlparse(self.path)
         if parsed.path == "/api/session-token":
+            if not is_loopback_local_request(self.client_address[0], self.headers.get("Origin")):
+                self._send_json({"ok": False, "message": "Token endpoints are restricted to the local application."}, status=403)
+                return
             env = self._extract_env()
-            delete_saved_token(env)
-            self._send_json({"ok": True, "env": env, "message": f"Saved token cleared for {env.upper()}."})
+            app = self._extract_token_app()
+            delete_saved_token(env, app)
+            self._send_json({"ok": True, "env": env, "app": app, "message": f"Saved {app.upper()} token cleared for {env.upper()}."})
             return
 
         if parsed.path == "/api/serial-history":
@@ -312,6 +379,18 @@ class AppHandler(BaseHTTPRequestHandler):
 
     def do_POST(self):
         parsed = urlparse(self.path)
+
+        if parsed.path == "/api/refresh-tme-token":
+            if not is_loopback_local_request(self.client_address[0], self.headers.get("Origin")):
+                self._send_json({"ok": False, "message": "Token endpoints are restricted to the local application."}, status=403)
+                return
+            self._start_tme_token_capture(parsed)
+            return
+
+        if parsed.path.startswith("/api/fota/mutations/"):
+            operation = parsed.path.removeprefix("/api/fota/mutations/")
+            self._proxy_fota_mutation(operation)
+            return
 
         if parsed.path in ("/api/smart-investigation", "/api/smart-investigation/chat"):
             self._smart_investigation_endpoint(parsed.path.endswith("/chat"))
@@ -366,6 +445,9 @@ class AppHandler(BaseHTTPRequestHandler):
             return
 
         if parsed.path == "/api/tme-token":
+            if not is_loopback_local_request(self.client_address[0], self.headers.get("Origin")):
+                self._send_json({"ok": False, "message": "Token endpoints are restricted to the local application."}, status=403)
+                return
             content_length = int(self.headers.get("Content-Length", "0"))
             request_body = self.rfile.read(content_length).decode("utf-8") if content_length else "{}"
             try:
@@ -375,18 +457,19 @@ class AppHandler(BaseHTTPRequestHandler):
                 return
 
             env = self._extract_env(payload)
+            app = self._extract_token_app(payload)
             token = str(payload.get("token", "") or "").strip()
             if not token:
                 self._send_json({"ok": False, "message": "No token provided."}, status=400)
                 return
 
-            if is_token_expired(token) or not is_tme_token(token, env=env):
-                delete_saved_token(env)
-                self._send_json({"ok": False, "message": f"TME token rejected and cleared for {env.upper()}."}, status=400)
+            with TOKEN_CAPTURE_FRESHNESS_LOCK:
+                min_issued_at = TOKEN_CAPTURE_FRESHNESS.get((env, app), 0)
+            if not store_captured_token(token, env, min_issued_at=min_issued_at, app=app):
+                self._send_json({"ok": False, "message": f"TME token rejected for {env.upper()}."}, status=400)
                 return
 
-            write_saved_token(token, env)
-            self._send_json({"ok": True, "env": env, "message": f"TME session token saved for {env.upper()}."})
+            self._send_json({"ok": True, "env": env, "app": app, "message": f"TME {app.upper()} session token saved for {env.upper()}."})
             return
 
         if parsed.path == "/api/wallbox":
@@ -415,7 +498,6 @@ class AppHandler(BaseHTTPRequestHandler):
 
         if parsed.path != "/api/events":
             self.send_error(404, "Not found")
-            return
 
         content_length = int(self.headers.get("Content-Length", "0"))
         request_body = self.rfile.read(content_length).decode("utf-8") if content_length else "{}"
@@ -482,7 +564,7 @@ class AppHandler(BaseHTTPRequestHandler):
                     message = exc.read().decode("utf-8", errors="replace")
                 except Exception:
                     pass
-            is_auth = status_code in (401, 403)
+            is_auth = status_code == 401
             is_not_found = status_code == 404
             err_msg = (
                 "Upstream TME session unauthorized or expired." if is_auth
@@ -514,6 +596,100 @@ class AppHandler(BaseHTTPRequestHandler):
         content_length = int(self.headers.get("Content-Length", "0"))
         request_body = self.rfile.read(content_length).decode("utf-8") if content_length else "{}"
         return json.loads(request_body) if request_body.strip() else {}
+
+    def _proxy_fota_mutation(self, operation):
+        origin = self.headers.get("Origin")
+        if not is_loopback_local_request(self.client_address[0], origin):
+            self._send_json({"ok": False, "message": "FOTA mutations are restricted to local application requests."}, status=403)
+            return
+
+        try:
+            payload = self._read_json_body()
+        except (json.JSONDecodeError, UnicodeDecodeError):
+            self._send_json({"ok": False, "message": "Request body is not valid JSON."}, status=400)
+            return
+        if not isinstance(payload, dict):
+            self._send_json({"ok": False, "message": "Request body must be a JSON object."}, status=400)
+            return
+
+        try:
+            result = execute_local_mutation(operation, payload)
+            self._send_json({"ok": True, **result})
+        except FotaMutationError as exc:
+            self._send_json({"ok": False, "message": str(exc)}, status=exc.status_code)
+
+    def _proxy_fota_read(self, parsed):
+        query = parse_qs(parsed.query)
+        params = {key: values[0] for key, values in query.items() if values}
+        env = self._extract_env()
+        token = read_saved_token(env, app="fota")
+
+        def page_value(name, default):
+            return params.get(name, default)
+
+        try:
+            if not token:
+                raise FotaReadError(401, "Authentication token is required.")
+
+            if parsed.path == "/api/fota/packages":
+                filters = {key: params[key] for key in ("vendor", "model", "version", "approvalStatus") if key in params}
+                if "isPushable" in params:
+                    value = params["isPushable"].lower()
+                    if value not in ("true", "false"):
+                        raise FotaReadError(400, "isPushable must be true or false.")
+                    filters["isPushable"] = value == "true"
+                payload = list_packages(
+                    env, token, page_value("page", 0), page_value("size", 5),
+                    params.get("beta", "false").lower() == "true", filters,
+                )
+            elif parsed.path == "/api/fota/package":
+                beta_value = params.get("beta", "false").lower()
+                if beta_value not in ("true", "false"):
+                    raise FotaReadError(400, "beta must be true or false.")
+                payload = get_package(
+                    env, token, params.get("version"), params.get("model"), beta_value == "true",
+                )
+            elif parsed.path == "/api/fota/campaigns":
+                payload = list_campaigns(
+                    env, token, page_value("page", 0), page_value("size", 5),
+                    params.get("beta", "false").lower() == "true",
+                )
+            elif parsed.path == "/api/fota/campaigns/launched":
+                payload = list_launched_campaigns(
+                    env, token, params.get("countryId"), params.get("chargerModel"),
+                )
+            elif parsed.path == "/api/fota/campaigns/launched-by-vendor":
+                payload = list_launched_campaigns_by_vendor(
+                    env, token, params.get("countryId"), params.get("vendor"),
+                )
+            elif parsed.path == "/api/fota/wallboxes":
+                filters = {key: params[key] for key in ("serialNumber", "model", "version", "status") if key in params}
+                if "countryIds" in query:
+                    filters["countryIds"] = query["countryIds"]
+                beta = None if "beta" not in params else params["beta"].lower() == "true"
+                payload = list_wallboxes(
+                    env, token, page_value("page", 0), page_value("size", 5), beta, filters,
+                )
+            elif parsed.path == "/api/fota/wallbox-membership":
+                payload = get_wallbox_membership(
+                    env, token, params.get("serialNumber"),
+                )
+            elif parsed.path == "/api/fota/metadata":
+                payload = get_filter_metadata(env, token)
+            else:
+                self._send_json({"ok": False, "env": env, "message": "FOTA read endpoint not found."}, status=404)
+                return
+
+            self._send_json({
+                "ok": True,
+                "env": env,
+                "data": payload.get("data", payload) if isinstance(payload, dict) else payload,
+                "payload": payload,
+            })
+        except FotaReadError as exc:
+            self._send_json({"ok": False, "env": env, "message": str(exc)}, status=exc.status_code)
+        except Exception:
+            self._send_json({"ok": False, "env": env, "message": "FOTA read request failed."}, status=502)
 
     def _smart_investigation_endpoint(self, is_chat):
         try:
@@ -916,8 +1092,7 @@ class AppHandler(BaseHTTPRequestHandler):
             if exc.code == 204:
                 remote_payload = {"data": {"content": [], "totalElements": 0, "totalPages": 0, "number": page, "size": size}}
             elif exc.code == 401:
-                delete_saved_token(env)
-                self._send_json({"ok": False, "env": env, "message": f"Session expired for {env.upper()}. Please refresh the session token.", "hasToken": False}, status=401)
+                self._send_json({"ok": False, "env": env, "message": f"Session expired for {env.upper()}. Please refresh the session token.", "hasToken": bool(token), "authError": True}, status=401)
                 return
             else:
                 message = str(exc)
@@ -1116,7 +1291,7 @@ class AppHandler(BaseHTTPRequestHandler):
                     message = exc.read().decode("utf-8", errors="replace")
                 except Exception:
                     pass
-            is_auth = status_code in (401, 403)
+            is_auth = status_code == 401
             is_not_found = status_code == 404
             self._send_json({
                 "ok": False,
@@ -1189,7 +1364,7 @@ class AppHandler(BaseHTTPRequestHandler):
                     message = exc.read().decode("utf-8", errors="replace")
                 except Exception:
                     pass
-            is_auth = status_code in (401, 403)
+            is_auth = status_code == 401
             is_not_found = status_code == 404
             err_msg = (
                 f"{label}: TME session unauthorized or expired." if is_auth
@@ -1422,6 +1597,7 @@ class AppHandler(BaseHTTPRequestHandler):
             self.send_header("Access-Control-Allow-Origin", "*")
             self.send_header("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
             self.send_header("Access-Control-Allow-Headers", "Content-Type, Authorization")
+            self.send_header("Cache-Control", "no-store")
             self.send_header("Content-Type", "application/json; charset=utf-8")
             self.send_header("Content-Length", str(len(body)))
             self.end_headers()
@@ -1435,7 +1611,7 @@ class AppHandler(BaseHTTPRequestHandler):
 
 def main():
     port = 8000
-    server = ThreadingHTTPServer(("0.0.0.0", port), AppHandler)
+    server = ThreadingHTTPServer(("127.0.0.1", port), AppHandler)
     print(f"Wallbox event timeline server listening on http://localhost:{port}")
     print("Press Ctrl+C to stop.")
     server.serve_forever()

@@ -1,0 +1,15 @@
+:host {
+  display: block;
+  min-height: 100vh;
+  background: var(--bg);
+  color: var(--text);
+}
+
+.fota-shell {
+  width: 100%;
+  margin: 0 auto;
+}
+
+.fota-content {
+  min-width: 0;
+}

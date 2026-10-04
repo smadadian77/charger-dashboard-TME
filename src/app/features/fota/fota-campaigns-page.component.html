@@ -1,0 +1,62 @@
+<section class="fota-page" aria-labelledby="fotaCampaignsHeading">
+  <header class="fota-page-heading">
+    <div>
+      <p class="fota-eyebrow">{{ isBeta() ? 'BETA TRACK' : 'FOTA' }}</p>
+      <h1 id="fotaCampaignsHeading">{{ isBeta() ? 'Beta campaigns' : 'Campaign registry' }}</h1>
+    </div>
+    <span class="fota-result-count" aria-live="polite">{{ totalItems().toLocaleString() }} campaigns</span>
+    @if (!isBeta()) {
+      <a class="fota-primary-button" routerLink="/fota/campaigns/create">Create campaign</a>
+    } @else {
+      <a class="fota-primary-button" routerLink="/fota/beta/campaigns/create">Create beta campaign</a>
+    }
+  </header>
+
+  @if (loading()) {
+    <p class="fota-state" role="status" aria-live="polite">Loading campaigns...</p>
+  } @else if (error()) {
+    <p class="fota-state fota-error" role="alert">{{ error() }}</p>
+  } @else if (campaigns().length === 0) {
+    <p class="fota-state" role="status">No campaigns are available.</p>
+  } @else {
+    <div class="fota-table-scroll">
+      <table class="fota-table">
+        <thead>
+          <tr>
+            <th scope="col">FOTA Campaign ID</th>
+            <th scope="col">Charger Model</th>
+            <th scope="col">Firmware Version</th>
+            <th scope="col">Target Chargers</th>
+            <th scope="col">Campaign Status</th>
+          </tr>
+        </thead>
+        <tbody>
+          @for (campaign of campaigns(); track campaign.campaignId) {
+            <tr>
+              <td class="fota-mono">{{ campaign.campaignId }}</td>
+              <td>{{ campaign.chargerModel }}</td>
+              <td>{{ campaign.firmwareVersion }}</td>
+              <td class="fota-targets">{{ targetSummary(campaign) }}</td>
+              <td>{{ campaign.overallCampaignStatus || 'Not supplied' }}</td>
+            </tr>
+          }
+        </tbody>
+      </table>
+    </div>
+
+    <nav class="fota-pagination" aria-label="Campaign pages">
+      <label>
+        <span>Items per page</span>
+        <select [value]="query.value.size" (change)="setPageSize($event)">
+          <option value="5">5</option><option value="10">10</option><option value="25">25</option><option value="50">50</option>
+        </select>
+      </label>
+      <span class="fota-page-range" role="status" aria-live="polite">{{ rangeStart() }} – {{ rangeEnd() }} of {{ totalItems() }}</span>
+      <div class="fota-page-buttons">
+        <button class="fota-secondary-button" type="button" [disabled]="query.value.page === 0" (click)="changePage(-1)" aria-label="Previous page">Previous</button>
+        <span>Page {{ currentPage() }} of {{ pageCount() }}</span>
+        <button class="fota-secondary-button" type="button" [disabled]="query.value.page >= pageCount() - 1" (click)="changePage(1)" aria-label="Next page">Next</button>
+      </div>
+    </nav>
+  }
+</section>

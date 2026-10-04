@@ -11,46 +11,37 @@ import sys
 import time
 from urllib.request import Request, urlopen
 
+from backend.auth import (
+    ENV_CLIENT_IDS,
+    decode_jwt_payload,
+    is_token_expired,
+    is_tme_token as is_backend_tme_token,
+)
+from backend.config import get_dashboard_url, get_fota_webapp_url, get_api_url, normalize_token_app
 from playwright.sync_api import sync_playwright
 
 parser = argparse.ArgumentParser(description="TME Token Bridge")
 parser.add_argument("--env", default="prod", choices=["prod", "acc", "prev"], help="Target environment")
+parser.add_argument("--app", default="charger", choices=["charger", "fota"], help="TME application to authenticate")
 parser.add_argument("--force", action="store_true", help="Force fresh login flow")
 parser.add_argument("--no-browser", action="store_true", help="Do not open browser tab (already opened by client)")
+parser.add_argument("--min-issued-at", type=int, default=0, help="Ignore tokens issued before this Unix timestamp")
 args, _ = parser.parse_known_args()
 ENV = args.env.lower()
+APP = normalize_token_app(args.app)
 FORCE = bool(args.force)
 NO_BROWSER = bool(args.no_browser)
+MIN_ISSUED_AT = max(0, args.min_issued_at)
 
-ENV_SETTINGS = {
-    "prod": {
-        "url": "https://tme-ev-chargingplatform-charger-dashboard-webapp.toyota-europe.com/wallbox/list",
-        "api_host": "tme-ev-chargingplatform.toyota-europe.com",
-    },
-    "acc": {
-        "url": "https://tme-ev-chargingplatform-charger-dashboard-webapp-acc.toyota-europe.com/wallbox/list",
-        "api_host": "tme-ev-chargingplatform-acc.toyota-europe.com",
-    },
-    "prev": {
-        "url": "https://tme-ev-chargingplatform-charger-dashboard-webapp-prev.toyota-europe.com/wallbox/list",
-        "api_host": "tme-ev-chargingplatform-prev.toyota-europe.com",
-    },
-}
-
-TME_URL = ENV_SETTINGS[ENV]["url"]
-TME_API_HOST = ENV_SETTINGS[ENV]["api_host"]
-LOCAL_TOKEN_URL = f"http://localhost:8000/api/tme-token?env={ENV}"
+TME_URL = get_fota_webapp_url(ENV) if APP == "fota" else get_dashboard_url(ENV)
+TME_API_HOST = get_api_url("", ENV).removeprefix("https://")
+LOCAL_TOKEN_URL = f"http://127.0.0.1:8000/api/tme-token?env={ENV}"
 PROFILE_ROOT = os.path.join(
     os.environ.get("LOCALAPPDATA", os.path.expanduser("~\\AppData\\Local")),
-    f"TMEWallboxBridge_{ENV}",
+    f"TMEWallboxBridge_{ENV}_{APP}",
 )
 LOG_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), f"tme_token_bridge_{ENV}.log")
 
-ENV_CLIENT_IDS = {
-    "prod": {"635b40b9-e2a6-4aa1-b091-4d293d7bf80d"},
-    "acc": {"999bf820-34e8-4078-9908-a9b99ea0fbce", "769328e8-3732-45f2-9724-34dba356564e"},
-    "prev": {"999bf820-34e8-4078-9908-a9b99ea0fbce", "769328e8-3732-45f2-9724-34dba356564e"},
-}
 TME_CLIENT_IDS = ENV_CLIENT_IDS.get(ENV, {"635b40b9-e2a6-4aa1-b091-4d293d7bf80d"})
 JWT_RE = re.compile(rb"eyJ[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}")
 LOCK_NAMES = {"SingletonLock", "SingletonCookie", "SingletonSocket", "lockfile"}
@@ -104,53 +95,11 @@ def log(message):
         pass
 
 
-def decode_jwt_payload(token):
-    if not token or "." not in token:
-        return None
-
-    segments = token.split(".")
-    if len(segments) != 3:
-        return None
-
-    payload_segment = segments[1]
-    padded_segment = payload_segment + "=" * (-len(payload_segment) % 4)
-
-    try:
-        decoded = base64.urlsafe_b64decode(padded_segment.encode("utf-8"))
-        return json.loads(decoded.decode("utf-8"))
-    except (TypeError, ValueError, json.JSONDecodeError):
-        return None
-
-
-def is_token_expired(token):
-    payload = decode_jwt_payload(str(token or "").strip())
-    if not payload:
-        return False
-
-    exp = payload.get("exp")
-    if isinstance(exp, (int, float)):
-        return int(exp) <= int(time.time()) + 30
-
-    return False
-
-
 def is_tme_token(token):
-    payload = decode_jwt_payload(str(token or "").strip())
-    if not payload:
-        return False
-
-    aud = payload.get("aud")
-    if isinstance(aud, list):
-        audiences = set(aud)
-    else:
-        audiences = {aud}
-    if audiences & {"00000003-0000-0000-c000-000000000000", "https://graph.microsoft.com"}:
-        return False
-
-    return bool(payload.get("exp") or payload.get("iat"))
+    return is_backend_tme_token(token, env=ENV)
 
 
-def pick_valid_tme_token(candidates):
+def pick_valid_tme_token(candidates, min_iat=MIN_ISSUED_AT):
     seen = []
     for candidate in candidates or []:
         if not candidate or not isinstance(candidate, str):
@@ -170,6 +119,10 @@ def pick_valid_tme_token(candidates):
         if is_token_expired(token):
             continue
         if is_tme_token(token):
+            payload = decode_jwt_payload(token) or {}
+            issued_at = payload.get("iat")
+            if min_iat and (not isinstance(issued_at, (int, float)) or issued_at < min_iat):
+                continue
             return token
 
     return None
@@ -226,15 +179,21 @@ def scrub_profile(profile_dir):
     return ok
 
 
+def _stale_profile_process_query(profile_root):
+    escaped_root = os.path.abspath(profile_root).replace("'", "''")
+    return (
+        f"$profileRoot = '{escaped_root}'; "
+        "Get-CimInstance Win32_Process | "
+        "Where-Object { $_.CommandLine -and $_.CommandLine.Contains($profileRoot) } | "
+        "ForEach-Object { $_.ProcessId }"
+    )
+
+
 def kill_stale_profile_processes(profile_root):
     if os.name != "nt":
         return
 
-    command = (
-        "Get-CimInstance Win32_Process | "
-        "Where-Object { $_.CommandLine -and $_.CommandLine -match 'TMEWallboxBridge' } | "
-        "ForEach-Object { $_.ProcessId }"
-    )
+    command = _stale_profile_process_query(profile_root)
     result = subprocess.run(
         ["powershell", "-NoProfile", "-ExecutionPolicy", "Bypass", "-Command", command],
         capture_output=True,
@@ -401,7 +360,7 @@ def save_token_to_local_server(token):
     if not valid_token:
         raise ValueError("No valid TME JWT was found in the browser session.")
 
-    request_body = json.dumps({"token": valid_token, "env": ENV}).encode("utf-8")
+    request_body = json.dumps({"token": valid_token, "env": ENV, "app": APP}).encode("utf-8")
     request = Request(
         LOCAL_TOKEN_URL,
         data=request_body,
@@ -546,7 +505,7 @@ def poll_for_token(context, browser):
             log("Browser closed before a TME token was captured.")
             return 1
 
-        api_token = pick_valid_tme_token(captured)
+        api_token = pick_valid_tme_token(captured, min_iat=MIN_ISSUED_AT)
         storage_token = None
         live_pages = open_pages(context)
         if not live_pages:
@@ -563,7 +522,7 @@ def poll_for_token(context, browser):
         else:
             closed_streak = 0
             for live_page in live_pages:
-                storage_token = pick_valid_tme_token(read_page_tokens(live_page))
+                storage_token = pick_valid_tme_token(read_page_tokens(live_page), min_iat=MIN_ISSUED_AT)
                 if storage_token:
                     break
                 if TME_API_HOST in (live_page.url or "") or "charger-dashboard" in (live_page.url or ""):
@@ -590,8 +549,16 @@ def is_dashboard_id_token(token, min_iat=0):
         return False
     payload = decode_jwt_payload(token) or {}
     aud = payload.get("aud")
-    audiences = set(aud) if isinstance(aud, list) else {aud}
+    if isinstance(aud, str):
+        audiences = {aud}
+    elif isinstance(aud, list) and all(isinstance(value, str) for value in aud):
+        audiences = set(aud)
+    else:
+        return False
     if not (audiences & TME_CLIENT_IDS):
+        return False
+    issued_at = payload.get("iat")
+    if min_iat and (not isinstance(issued_at, (int, float)) or issued_at < min_iat):
         return False
     return True
 
@@ -601,7 +568,7 @@ def pick_dashboard_token(candidates, min_iat=0):
     best_exp = -1
     seen = set()
     for token in candidates or []:
-        if not token or token in seen or not is_dashboard_id_token(token):
+        if not token or token in seen or not is_dashboard_id_token(token, min_iat=min_iat):
             continue
         seen.add(token)
         exp = (decode_jwt_payload(token) or {}).get("exp") or 0
@@ -794,7 +761,7 @@ def main():
         opened_tab = open_tme_tab()
 
     for attempt in range(1, 181):
-        token = find_dashboard_token(include_ldb=True)
+        token = find_dashboard_token(include_ldb=True, min_iat=MIN_ISSUED_AT)
         if token:
             try:
                 status, response_body = save_token_to_local_server(token)
@@ -802,7 +769,7 @@ def main():
                 return 0
             except Exception as exc:
                 log(f"Failed to save token to local server: {exc}")
-        if not opened_tab and (not NO_BROWSER or attempt >= 2):
+        if not opened_tab and not NO_BROWSER:
             opened_tab = open_tme_tab()
         log(f"Waiting for TME sign-in in browser... attempt {attempt}/180")
         time.sleep(2)

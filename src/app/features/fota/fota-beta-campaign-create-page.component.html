@@ -1,0 +1,97 @@
+<section class="fota-page" aria-labelledby="betaCampaignCreateHeading">
+  <header class="fota-page-heading">
+    <div>
+      <p class="fota-eyebrow">BETA</p>
+      <h1 id="betaCampaignCreateHeading">Create beta campaign</h1>
+    </div>
+    <a class="fota-secondary-button" routerLink="/fota/beta/campaigns">Beta campaign registry</a>
+  </header>
+
+  @if (!mutationCapabilities()?.enabled) {
+    <p class="fota-safety-note" role="status">Beta campaign creation is disabled. Configure a local loopback mutation mock to enable submission.</p>
+  }
+  @if (mutationSuccess()) {
+    <p class="fota-inline-result" role="status" aria-live="polite">{{ mutationSuccess() }}</p>
+  }
+  @if (loadError()) {
+    <p class="fota-state fota-error" role="alert">{{ loadError() }}</p>
+  }
+
+  <form class="fota-campaign-form" [formGroup]="form" (ngSubmit)="requestCreate()">
+    <fieldset [disabled]="loading() || mutationLoading()">
+      <legend>Beta campaign details</legend>
+      <div class="fota-form-grid">
+        <label>
+          <span>Firmware model</span>
+          <select formControlName="model" (change)="onModelChange()">
+            <option value="">Select a firmware model</option>
+            @for (model of models(); track model) { <option [value]="model">{{ model }}</option> }
+          </select>
+        </label>
+        <label>
+          <span>Beta firmware version</span>
+          <select formControlName="firmwareVersion">
+            <option value="">Select a firmware version</option>
+            @for (version of versions(); track version) { <option [value]="version">{{ version }}</option> }
+          </select>
+        </label>
+        <label class="fota-check-label">
+          <input type="checkbox" formControlName="linkedCampaign" />
+          <span>Linked campaign</span>
+        </label>
+        @if (form.controls.linkedCampaign.value) {
+          <label>
+            <span>Child firmware version</span>
+            <select formControlName="childVersion">
+              <option value="">Select one child version</option>
+              @for (version of childVersions(); track version) { <option [value]="version">{{ version }}</option> }
+            </select>
+          </label>
+        }
+        <label class="fota-check-label">
+          <input type="checkbox" formControlName="directPush" />
+          <span>Push directly for installation</span>
+        </label>
+      </div>
+
+      <fieldset class="fota-beta-targets">
+        <legend>Beta wallboxes ({{ form.controls.betaWallboxesList.value.length }} selected)</legend>
+        @if (!form.controls.model.value) {
+          <p class="fota-state">Select a model to view its beta wallboxes.</p>
+        } @else if (eligibleWallboxes().length === 0) {
+          <p class="fota-state">No beta wallboxes are available for this model.</p>
+        } @else {
+          <div class="fota-beta-wallbox-options">
+            @for (wallbox of eligibleWallboxes(); track wallbox.serialNumber) {
+              <label class="fota-check-label">
+                <input type="checkbox" [checked]="isWallboxSelected(wallbox.serialNumber)" (change)="toggleWallbox(wallbox.serialNumber, $event)" />
+                <span class="fota-mono">{{ wallbox.serialNumber }}</span>
+              </label>
+            }
+          </div>
+        }
+      </fieldset>
+
+      <div class="fota-form-actions">
+        <button class="fota-primary-button" type="submit" [disabled]="!canCreate()">
+          {{ mutationLoading() ? 'Creating...' : 'Review beta campaign' }}
+        </button>
+      </div>
+    </fieldset>
+  </form>
+</section>
+
+<dialog #createBetaCampaignDialog class="fota-detail-dialog" aria-labelledby="betaCampaignConfirmHeading">
+  <header class="fota-detail-heading">
+    <h2 id="betaCampaignConfirmHeading">Confirm beta campaign</h2>
+    <button class="fota-icon-button" type="button" aria-label="Cancel beta campaign creation" [disabled]="mutationLoading()" (click)="closeCreateDialog()">Cancel</button>
+  </header>
+  <p>Submit {{ form.controls.firmwareVersion.value }} for {{ form.controls.model.value }} to {{ form.controls.betaWallboxesList.value.length }} beta wallboxes?</p>
+  <p class="fota-safety-note">This request is restricted to the configured loopback mock target. Toyota hosts are blocked by the backend.</p>
+  @if (mutationError()) { <p class="fota-state fota-error" role="alert">{{ mutationError() }}</p> }
+  <div class="fota-filter-actions">
+    <button class="fota-primary-button" type="button" [disabled]="mutationLoading() || !mutationCapabilities()?.enabled" (click)="createCampaign()">
+      {{ mutationLoading() ? 'Creating...' : 'Confirm' }}
+    </button>
+  </div>
+</dialog>

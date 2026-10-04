@@ -1,0 +1,159 @@
+<section class="fota-page" aria-labelledby="fotaPackagesHeading">
+  <header class="fota-page-heading">
+    <div>
+      <p class="fota-eyebrow">{{ isBeta() ? 'BETA CATALOG' : 'FIRMWARE CATALOG' }}</p>
+      <h1 id="fotaPackagesHeading">{{ isBeta() ? 'Beta packages' : 'Firmware packages' }}</h1>
+    </div>
+    <span class="fota-result-count" aria-live="polite">{{ totalItems().toLocaleString() }} packages</span>
+  </header>
+
+  @if (!mutationCapabilities()?.enabled) {
+    <p class="fota-safety-note" role="status">Read-only mode. Firmware mutations require an explicitly configured loopback mock target.</p>
+  }
+
+  <form class="fota-filter-bar" [formGroup]="filters" (ngSubmit)="applyFilters()">
+    <label>
+      <span>Charger vendor</span>
+      <select formControlName="vendor">
+        <option value="">All vendors</option>
+        <option value="ChargeDot">ChargeDot</option>
+        <option value="COMPLEO">Compleo</option>
+      </select>
+    </label>
+    <label>
+      <span>Model</span>
+      <input type="search" formControlName="model" placeholder="Filter model" />
+    </label>
+    <label>
+      <span>Version</span>
+      <input type="search" formControlName="version" placeholder="Filter version" />
+    </label>
+    <label>
+      <span>{{ isBeta() ? 'Beta approval' : 'Production readiness' }}</span>
+      @if (isBeta()) {
+        <select formControlName="approvalStatus">
+          <option value="">All approval states</option>
+          <option value="NOT_TESTED">Not tested</option>
+          <option value="TESTED">Tested</option>
+        </select>
+      } @else {
+        <select formControlName="isPushable">
+          <option value="">All readiness states</option>
+          <option value="true">Production ready</option>
+          <option value="false">No production ready</option>
+        </select>
+      }
+    </label>
+    <div class="fota-filter-actions">
+      <button class="fota-primary-button" type="submit">Apply</button>
+      <button class="fota-secondary-button" type="button" (click)="resetFilters()">Reset</button>
+    </div>
+  </form>
+
+  @if (loading()) {
+    <p class="fota-state" role="status" aria-live="polite">Loading firmware packages...</p>
+  } @else if (error()) {
+    <div class="fota-state fota-error" role="alert">
+      <span>{{ error() }}</span>
+      <button class="fota-secondary-button" type="button" (click)="applyFilters()">Retry</button>
+    </div>
+  } @else if (packages().length === 0) {
+    <p class="fota-state" role="status">No firmware packages match these filters.</p>
+  } @else {
+    <div class="fota-package-grid" aria-label="Firmware packages">
+      @for (item of packages(); track packageKey(item)) {
+        <article class="fota-package">
+          <header class="fota-package-heading">
+            <span class="fota-vendor">{{ item.vendor || 'ChargeDot' }}</span>
+            <span class="fota-readiness" [class.is-ready]="isBeta() ? item.approvalStatus === 'TESTED' : item.isPushable">
+              {{ isBeta() ? (item.approvalStatus || 'Not tested') : (item.isPushable ? 'Production ready' : 'No production ready') }}
+            </span>
+          </header>
+          <dl class="fota-package-data">
+            <div><dt>Model</dt><dd>{{ item.model || 'N/A' }}</dd></div>
+            <div><dt>Version</dt><dd>{{ item.version || 'N/A' }}</dd></div>
+            @if (item.beta) {
+              <div><dt>Track</dt><dd>Beta</dd></div>
+            }
+          </dl>
+          <footer class="fota-package-footer">
+            <span class="fota-approval">{{ item.approvalStatus || (isBeta() ? 'Not tested' : 'Standard release') }}</span>
+            <div class="fota-package-actions">
+              <button class="fota-secondary-button" type="button" (click)="openDetails(item)">Details</button>
+              <button
+                class="fota-secondary-button"
+                type="button"
+                [disabled]="!mutationCapabilities()?.enabled || (isBeta() && item.approvalStatus === 'TESTED')"
+                [attr.title]="mutationCapabilities()?.enabled ? (isBeta() ? 'Mark beta firmware as tested' : 'Change production readiness') : 'Mutation target is not configured'"
+                (click)="requestReadinessChange(item)"
+              >{{ isBeta() ? (item.approvalStatus === 'TESTED' ? 'Tested' : 'Mark tested') : (item.isPushable ? 'Disable push' : 'Mark production ready') }}</button>
+            </div>
+          </footer>
+        </article>
+      }
+    </div>
+
+    <nav class="fota-pagination" aria-label="Package pages">
+      <label>
+        <span>Items per page</span>
+        <select [value]="query.value.size" (change)="setPageSize($event)">
+          <option value="5">5</option>
+          <option value="10">10</option>
+          <option value="25">25</option>
+          <option value="50">50</option>
+        </select>
+      </label>
+      <span class="fota-page-range" role="status" aria-live="polite">
+        {{ rangeStart() }} – {{ rangeEnd() }} of {{ totalItems() }}
+      </span>
+      <div class="fota-page-buttons">
+        <button class="fota-secondary-button" type="button" [disabled]="query.value.page === 0" (click)="changePage(-1)" aria-label="Previous page">Previous</button>
+        <span>Page {{ currentPage() }} of {{ pageCount() }}</span>
+        <button class="fota-secondary-button" type="button" [disabled]="query.value.page >= pageCount() - 1" (click)="changePage(1)" aria-label="Next page">Next</button>
+      </div>
+    </nav>
+  }
+</section>
+
+<dialog #packageDetails class="fota-detail-dialog" aria-labelledby="packageDetailHeading">
+  <header class="fota-detail-heading">
+    <h2 id="packageDetailHeading">Package details</h2>
+    <button class="fota-icon-button" type="button" aria-label="Close details" (click)="closeDetails()">Close</button>
+  </header>
+  @if (detailLoading()) {
+    <p class="fota-state" role="status">Loading package details...</p>
+  } @else if (detailError()) {
+    <p class="fota-state fota-error" role="alert">{{ detailError() }}</p>
+  } @else if (selectedPackage(); as item) {
+    <dl class="fota-detail-list">
+      <div><dt>Vendor</dt><dd>{{ item.vendor || 'ChargeDot' }}</dd></div>
+      <div><dt>Model</dt><dd>{{ item.model }}</dd></div>
+      <div><dt>Version</dt><dd>{{ item.version }}</dd></div>
+      <div><dt>{{ isBeta() ? 'Beta approval' : 'Production readiness' }}</dt><dd>{{ isBeta() ? (item.approvalStatus || 'Not tested') : (item.isPushable ? 'Production ready' : 'No production ready') }}</dd></div>
+      <div><dt>Approval</dt><dd>{{ item.approvalStatus || (isBeta() ? 'Not tested' : 'Not supplied') }}</dd></div>
+      <div><dt>Beta</dt><dd>{{ item.beta ?? isBeta() ? 'Yes' : 'No' }}</dd></div>
+      @if (item.releaseNotesUrl) {
+        <div><dt>Release notes</dt><dd><a [href]="item.releaseNotesUrl" target="_blank" rel="noopener noreferrer">Open release notes</a></dd></div>
+      }
+    </dl>
+  }
+</dialog>
+
+<dialog #readinessDialog class="fota-detail-dialog" aria-labelledby="readinessDialogHeading" (close)="onReadinessDialogClosed()">
+  <header class="fota-detail-heading">
+    <h2 id="readinessDialogHeading">{{ isBeta() ? 'Confirm beta test status' : 'Confirm readiness change' }}</h2>
+    <button class="fota-icon-button" type="button" aria-label="Close confirmation" [disabled]="mutationLoading()" (click)="closeReadinessDialog()">Cancel</button>
+  </header>
+  @if (pendingReadinessPackage(); as item) {
+    <p>{{ isBeta() ? 'Mark' : 'Set' }} {{ item.model }} version {{ item.version }} {{ isBeta() ? 'as tested?' : 'to ' + (item.isPushable ? 'not production ready' : 'production ready') + '?' }}</p>
+  }
+  <p class="fota-safety-note">This sends only to the configured local mock target. Toyota hosts are blocked by the backend.</p>
+  @if (mutationError()) {
+    <p class="fota-state fota-error" role="alert">{{ mutationError() }}</p>
+  }
+  <div class="fota-filter-actions">
+    <button class="fota-primary-button" type="button" [disabled]="mutationLoading() || !mutationCapabilities()?.enabled" (click)="confirmReadinessChange()">
+      {{ mutationLoading() ? 'Sending...' : 'Confirm' }}
+    </button>
+  </div>
+</dialog>

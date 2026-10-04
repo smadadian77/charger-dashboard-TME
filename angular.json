@@ -48,13 +48,15 @@
               {
                 "glob": "**/*",
                 "input": "public"
+              },
+              {
+                "glob": "dashboard-engine.js",
+                "input": "src",
+                "output": "/"
               }
             ],
             "styles": [
               "src/styles.css"
-            ],
-            "scripts": [
-              "src/dashboard-engine.js"
             ]
           },
           "configurations": {

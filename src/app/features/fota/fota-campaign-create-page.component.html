@@ -1,0 +1,116 @@
+<section class="fota-page" aria-labelledby="campaignCreateHeading">
+  <header class="fota-page-heading">
+    <div>
+      <p class="fota-eyebrow">FOTA</p>
+      <h1 id="campaignCreateHeading">Create campaign</h1>
+    </div>
+    <a class="fota-secondary-button" routerLink="/fota/campaigns">Campaign registry</a>
+  </header>
+
+  @if (!mutationCapabilities()?.enabled) {
+    <p class="fota-safety-note" role="status">Campaign creation is disabled. Configure a local loopback mutation mock to enable submission.</p>
+  }
+  @if (mutationSuccess()) {
+    <p class="fota-inline-result" role="status" aria-live="polite">{{ mutationSuccess() }}</p>
+  }
+  @if (loadError()) {
+    <p class="fota-state fota-error" role="alert">{{ loadError() }}</p>
+  }
+
+  <form class="fota-campaign-form" [formGroup]="form" (ngSubmit)="requestCreate()">
+    <fieldset [disabled]="loading() || mutationLoading()">
+      <legend>General info</legend>
+      <div class="fota-form-grid">
+        <label>
+          <span>Firmware vendor</span>
+          <select formControlName="vendor" (change)="onVendorChange()">
+            <option value="">Select a vendor</option>
+            @for (vendor of vendors(); track vendor) { <option [value]="vendor">{{ vendor }}</option> }
+          </select>
+        </label>
+        @if (form.controls.vendor.value !== 'COMPLEO') {
+        <label>
+          <span>Firmware model</span>
+          <select formControlName="model" (change)="onModelChange()">
+            <option value="">Select a firmware model</option>
+            @for (model of models(); track model) { <option [value]="model">{{ model }}</option> }
+          </select>
+        </label>
+        }
+        <label>
+          <span>Campaign country</span>
+          <select formControlName="countryId" (change)="onCountryChange()">
+            <option value="">Select a country</option>
+            @for (country of countries(); track country) { <option [value]="country">{{ country }}</option> }
+          </select>
+        </label>
+        <label>
+          <span>Firmware version</span>
+          <select formControlName="firmwareVersion">
+            <option value="">Select a firmware version</option>
+            @for (version of versions(); track version) { <option [value]="version">{{ version }}</option> }
+          </select>
+        </label>
+        <label class="fota-check-label">
+          <input type="checkbox" formControlName="panEuropean" />
+          <span>Pan-European campaign</span>
+        </label>
+        <label class="fota-check-label">
+          <input type="checkbox" formControlName="linkedCampaign" />
+          <span>Linked campaign</span>
+        </label>
+        @if (form.controls.linkedCampaign.value) {
+          <label>
+            <span>Child firmware version</span>
+            <select formControlName="childVersion">
+              <option value="">Select one child version</option>
+              @for (version of childVersions(); track version) { <option [value]="version">{{ version }}</option> }
+            </select>
+          </label>
+        }
+      </div>
+      <div class="fota-form-actions">
+        <button class="fota-primary-button" type="submit" [disabled]="!canCreate()">
+          {{ mutationLoading() ? 'Creating...' : 'Review campaign' }}
+        </button>
+        @if (!form.controls.panEuropean.value) {
+          <button class="fota-secondary-button" type="button" [disabled]="!form.controls.vendor.value || (form.controls.vendor.value !== 'COMPLEO' && !form.controls.model.value) || !form.controls.countryId.value || launchedLoading()" (click)="loadLaunchedCampaigns()">
+            {{ launchedLoading() ? 'Loading...' : 'Launched campaigns' }}
+          </button>
+        }
+      </div>
+    </fieldset>
+  </form>
+
+  @if (launchedError()) { <p class="fota-inline-error" role="alert">{{ launchedError() }}</p> }
+  @if (launchedCampaigns().length > 0) {
+    <section class="fota-launched-section" aria-labelledby="launchedHeading">
+      <h2 id="launchedHeading">Launched campaigns for this model and country</h2>
+      <div class="fota-table-scroll">
+        <table class="fota-table">
+          <thead><tr><th scope="col">Campaign</th><th scope="col">Firmware</th><th scope="col">Status</th></tr></thead>
+          <tbody>
+            @for (campaign of launchedCampaigns(); track campaign.campaignId) {
+              <tr><td class="fota-mono">{{ campaign.campaignId }}</td><td>{{ campaign.firmwareVersion }}</td><td>{{ campaign.overallCampaignStatus || 'Not supplied' }}</td></tr>
+            }
+          </tbody>
+        </table>
+      </div>
+    </section>
+  }
+</section>
+
+<dialog #createCampaignDialog class="fota-detail-dialog" aria-labelledby="createCampaignConfirmHeading">
+  <header class="fota-detail-heading">
+    <h2 id="createCampaignConfirmHeading">Confirm campaign creation</h2>
+    <button class="fota-icon-button" type="button" aria-label="Cancel campaign creation" [disabled]="mutationLoading()" (click)="closeCreateDialog()">Cancel</button>
+  </header>
+  <p>Submit {{ form.controls.firmwareVersion.value }} for {{ form.controls.model.value }}?</p>
+  <p class="fota-safety-note">This request is restricted to the configured loopback mock target. Toyota hosts are blocked by the backend.</p>
+  @if (mutationError()) { <p class="fota-state fota-error" role="alert">{{ mutationError() }}</p> }
+  <div class="fota-filter-actions">
+    <button class="fota-primary-button" type="button" [disabled]="mutationLoading() || !mutationCapabilities()?.enabled" (click)="createCampaign()">
+      {{ mutationLoading() ? 'Creating...' : 'Confirm' }}
+    </button>
+  </div>
+</dialog>
