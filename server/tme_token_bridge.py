@@ -735,30 +735,25 @@ def chrome_executable():
     return ""
 
 
-def open_tme_tab():
-    chrome = chrome_executable()
-    if chrome:
-        try:
-            subprocess.Popen([chrome, TME_URL], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-            log(f"Opened TME dashboard tab for {ENV.upper()} ({TME_URL}) using {os.path.basename(chrome)}.")
-            return True
-        except Exception as exc:
-            log(f"Failed to open browser with executable {chrome}: {exc}")
+def open_tme_tab(new=2):
     try:
         import webbrowser
-        webbrowser.open(TME_URL)
-        log(f"Opened TME dashboard tab for {ENV.upper()} in default system browser.")
-        return True
+        opened = webbrowser.open(TME_URL, new=new)
+        if opened:
+            log(f"Opened TME {APP.upper()} tab for {ENV.upper()} in the default browser window.")
+            return True
+        log("The default browser did not confirm opening a new tab.")
+        return False
     except Exception as exc:
         log(f"Could not open browser: {exc}")
         return False
 
 
-def main():
-    log(f"Looking for a TME session token for {ENV.upper()} in browser storage (force={FORCE}, no_browser={NO_BROWSER}).")
+def run_external_browser_capture():
+    log(f"Looking for a TME session token for {ENV.upper()} in browser storage.")
     opened_tab = False
-    if FORCE and not NO_BROWSER:
-        opened_tab = open_tme_tab()
+    open_attempted = False
+    page_retry_attempted = False
 
     for attempt in range(1, 181):
         token = find_dashboard_token(include_ldb=True, min_iat=MIN_ISSUED_AT)
@@ -769,12 +764,47 @@ def main():
                 return 0
             except Exception as exc:
                 log(f"Failed to save token to local server: {exc}")
-        if not opened_tab and not NO_BROWSER:
+        if not open_attempted and not NO_BROWSER:
+            open_attempted = True
             opened_tab = open_tme_tab()
+        elif APP == "fota" and opened_tab and not page_retry_attempted and attempt >= 10:
+            page_retry_attempted = True
+            log("No FOTA token appeared after the initial page load; retrying the URL in the existing browser window.")
+            open_tme_tab(new=0)
         log(f"Waiting for TME sign-in in browser... attempt {attempt}/180")
         time.sleep(2)
     log("TME sign-in did not complete in time. Sign in on the TME tab and reload the local page.")
     return 1
+
+
+def run_playwright_capture():
+    with sync_playwright() as playwright:
+        for launch_attempt in range(2):
+            profile_dir = acquire_profile_dir(PROFILE_ROOT)
+            context, browser = launch_persistent(playwright, profile_dir)
+            if context is None:
+                try:
+                    context, browser = launch_ephemeral(playwright)
+                except Exception as exc:
+                    log(f"Could not launch a browser for TME authentication: {exc}")
+                    return 1
+
+            try:
+                result = poll_for_token(context, browser)
+            finally:
+                close_quietly(context, browser)
+
+            if result != "relaunch":
+                return result
+            if launch_attempt == 0:
+                log("Restarting the TME browser after an early launch failure.")
+
+    return 1
+
+
+def main():
+    log(f"Starting TME token capture for {ENV.upper()} {APP.upper()} (force={FORCE}, no_browser={NO_BROWSER}).")
+    return run_external_browser_capture()
 
 
 if __name__ == "__main__":

@@ -140,6 +140,15 @@ from backend.services.fota_mutation_service import (
     is_loopback_local_request,
     mutation_capabilities,
 )
+from backend.services.kubernetes_service import (
+    KubernetesReadError,
+    credential_status as get_kubernetes_credential_status,
+    get_node_infrastructure as get_kubernetes_node_infrastructure,
+    get_pod_logs as get_kubernetes_pod_logs,
+    list_pods as list_kubernetes_pods,
+    start_sso_login as start_kubernetes_sso_login,
+)
+from backend.services.chargedot_service import ChargeDotError, get_charger_data as get_chargedot_data
 from backend.services.support_ops_service import (
     SUPPORT_OPERATION_SPECS,
     _build_support_operation_request,
@@ -192,6 +201,40 @@ class AppHandler(BaseHTTPRequestHandler):
     def do_GET(self):
         parsed = urlparse(self.path)
 
+        if parsed.path.startswith("/api/kubernetes/"):
+            if not is_loopback_local_request(self.client_address[0], self.headers.get("Origin")):
+                self._send_json({"ok": False, "message": "Kubernetes access is restricted to the local application."}, status=403)
+                return
+            params = parse_qs(parsed.query)
+            env = params.get("env", [""])[0]
+            try:
+                if parsed.path == "/api/kubernetes/status":
+                    self._send_json({"ok": True, **get_kubernetes_credential_status(env)})
+                elif parsed.path == "/api/kubernetes/pods":
+                    namespace = params.get("namespace", ["all"])[0]
+                    self._send_json({"ok": True, **list_kubernetes_pods(env, namespace)})
+                elif parsed.path == "/api/kubernetes/infrastructure":
+                    namespace = params.get("namespace", ["all"])[0]
+                    force_refresh = params.get("refresh", [""])[0].lower() == "true"
+                    self._send_json({"ok": True, **get_kubernetes_node_infrastructure(env, namespace, force_refresh)})
+                elif parsed.path == "/api/kubernetes/logs":
+                    self._send_json({
+                        "ok": True,
+                        **get_kubernetes_pod_logs(
+                            env,
+                            params.get("namespace", [""])[0],
+                            params.get("pod", [""])[0],
+                            params.get("container", [""])[0],
+                            params.get("previous", [""])[0].lower() == "true",
+                            params.get("since", ["1h"])[0],
+                        ),
+                    })
+                else:
+                    self.send_error(404, "Not found")
+            except KubernetesReadError as exc:
+                self._send_json({"ok": False, "message": str(exc)}, status=exc.status_code)
+            return
+
         if parsed.path in {"/api/session-token", "/api/token-status", "/api/refresh-tme-token"}:
             if not is_loopback_local_request(self.client_address[0], self.headers.get("Origin")):
                 self._send_json({"ok": False, "message": "Token endpoints are restricted to the local application."}, status=403)
@@ -199,6 +242,18 @@ class AppHandler(BaseHTTPRequestHandler):
 
         if parsed.path == "/api/health":
             self._send_json({"ok": True, "status": "ready"})
+            return
+
+        if parsed.path == "/api/chargedot/charger":
+            if not is_loopback_local_request(self.client_address[0], self.headers.get("Origin")):
+                self._send_json({"ok": False, "message": "ChargeDot data is restricted to the local application."}, status=403)
+                return
+            params = parse_qs(parsed.query)
+            serial_number = params.get("serialNumber", [""])[0]
+            try:
+                self._send_json({"ok": True, "data": get_chargedot_data(serial_number)})
+            except ChargeDotError as exc:
+                self._send_json({"ok": False, "message": str(exc)}, status=exc.status_code)
             return
 
         if parsed.path == "/api/fota/mutation-capabilities":
@@ -212,7 +267,9 @@ class AppHandler(BaseHTTPRequestHandler):
         if parsed.path == "/api/session-token":
             env = self._extract_env()
             app = self._extract_token_app()
-            token = read_saved_token(env, app=app)
+            params = parse_qs(parsed.query)
+            scan_browser = params.get("scanBrowser", ["0"])[0].lower() in ("1", "true", "yes")
+            token = read_saved_token(env, allow_browser_scan=scan_browser, app=app)
             self._send_json({
                 "ok": True,
                 "env": env,
@@ -298,7 +355,7 @@ class AppHandler(BaseHTTPRequestHandler):
             }, status=501)
             return
 
-        token = read_saved_token(env, app=app)
+        token = read_saved_token(env, allow_browser_scan=not force, app=app)
         if app == "fota" and not token:
             force = True
         min_issued_at = int(time.time()) + 1 if force else 0
@@ -379,6 +436,18 @@ class AppHandler(BaseHTTPRequestHandler):
 
     def do_POST(self):
         parsed = urlparse(self.path)
+
+        if parsed.path == "/api/kubernetes/login":
+            if not is_loopback_local_request(self.client_address[0], self.headers.get("Origin")):
+                self._send_json({"ok": False, "message": "Kubernetes access is restricted to the local application."}, status=403)
+                return
+            params = parse_qs(parsed.query)
+            env = params.get("env", [""])[0]
+            try:
+                self._send_json({"ok": True, **start_kubernetes_sso_login(env)})
+            except KubernetesReadError as exc:
+                self._send_json({"ok": False, "message": str(exc)}, status=exc.status_code)
+            return
 
         if parsed.path == "/api/refresh-tme-token":
             if not is_loopback_local_request(self.client_address[0], self.headers.get("Origin")):
@@ -1610,11 +1679,68 @@ class AppHandler(BaseHTTPRequestHandler):
 
 
 def main():
-    port = 8000
-    server = ThreadingHTTPServer(("127.0.0.1", port), AppHandler)
+    port = DEFAULT_PORT
+    if os.name == "nt":
+        cleanup_script = build_dashboard_process_cleanup_script(port, os.getpid())
+        result = subprocess.run(
+            ["powershell", "-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-Command", cleanup_script],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        if result.returncode == 2:
+            raise RuntimeError(f"Port {port} is occupied by another application; it was not stopped.")
+        if result.returncode == 3:
+            print(f"Dashboard server is already running on http://localhost:{port}")
+            return
+        if result.returncode != 0:
+            raise RuntimeError("Could not check for another dashboard server process.")
+
+    try:
+        server = ThreadingHTTPServer(("127.0.0.1", port), AppHandler)
+    except OSError as error:
+        if error.errno == 10048:
+            print(f"Dashboard server is already running on http://localhost:{port}")
+            return
+        raise
     print(f"Wallbox event timeline server listening on http://localhost:{port}")
     print("Press Ctrl+C to stop.")
     server.serve_forever()
+
+
+def build_dashboard_process_cleanup_script(port, current_pid):
+    server_path = os.path.realpath(__file__).replace("'", "''")
+    launcher_path = os.path.realpath(os.path.join(os.path.dirname(__file__), "..", "launcher.py")).replace("'", "''")
+    return f"""
+$ErrorActionPreference = 'Stop'
+$serverPath = '{server_path}'
+$launcherPath = '{launcher_path}'
+$dashboardExecutable = 'ChargerDashboardAngular.exe'
+$currentPid = {int(current_pid)}
+$cleanupPid = $PID
+$port = {int(port)}
+$owners = @(Get-NetTCPConnection -LocalPort $port -State Listen -ErrorAction SilentlyContinue | Select-Object -ExpandProperty OwningProcess -Unique)
+$dashboardProcesses = @(Get-CimInstance Win32_Process | Where-Object {{
+    $executableName = [IO.Path]::GetFileName([string]$_.ExecutablePath)
+    $isPython = $executableName -in @('python.exe', 'pythonw.exe', 'py.exe')
+    $relativeDashboardScript = $isPython -and $_.ProcessId -in $owners -and (
+        $_.CommandLine -like '*server/server.py*' -or
+        $_.CommandLine -like '*server\\server.py*' -or
+        $_.CommandLine -like '*launcher.py*'
+    )
+    $_.ProcessId -ne $currentPid -and $_.ProcessId -ne $cleanupPid -and $_.CommandLine -and (
+        $_.CommandLine.IndexOf($serverPath, [StringComparison]::OrdinalIgnoreCase) -ge 0 -or
+        $_.CommandLine.IndexOf($launcherPath, [StringComparison]::OrdinalIgnoreCase) -ge 0 -or
+        $executableName -ieq $dashboardExecutable -or
+        $relativeDashboardScript
+    )
+}})
+$dashboardPids = @($dashboardProcesses | ForEach-Object {{ [int]$_.ProcessId }})
+$foreignOwners = @($owners | Where-Object {{ $_ -ne $currentPid -and $_ -notin $dashboardPids }})
+if ($foreignOwners.Count -gt 0) {{ exit 2 }}
+$activeDashboardOwners = @($owners | Where-Object {{ $_ -ne $currentPid -and $_ -in $dashboardPids }})
+if ($activeDashboardOwners.Count -gt 0) {{ exit 3 }}
+"""
 
 
 if __name__ == "__main__":

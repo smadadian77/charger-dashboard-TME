@@ -76,7 +76,112 @@ class TokenRouteTests(unittest.TestCase):
 
         self.assertEqual(status, 200)
         self.assertEqual(payload["app"], "fota")
-        read_token.assert_called_once_with("acc", app="fota")
+        read_token.assert_called_once_with("acc", allow_browser_scan=False, app="fota")
+
+    def test_session_token_can_scan_existing_browser_storage_on_request(self):
+        with patch("server.read_saved_token", return_value="synthetic-browser-token") as read_token:
+            status, payload = self.request_json(
+                "GET", "/api/session-token?env=prod&app=charger&scanBrowser=1"
+            )
+
+        self.assertEqual(status, 200)
+        self.assertEqual(payload["token"], "synthetic-browser-token")
+        read_token.assert_called_once_with("prod", allow_browser_scan=True, app="charger")
+
+    def test_chargedot_route_returns_sensitive_record_to_local_ui_only(self):
+        manufacturer_record = {
+            "serialNumber": "TACW2244723S0930",
+            "model": "ChargeDot wallbox",
+            "sensitiveData": {"pinCode": "synthetic-pin", "iccid": "synthetic-iccid"},
+        }
+        with patch("server.get_chargedot_data", return_value=manufacturer_record) as get_data:
+            status, payload = self.request_json(
+                "GET", "/api/chargedot/charger?serialNumber=TACW2244723S0930"
+            )
+
+        self.assertEqual(status, 200)
+        self.assertEqual(payload["data"]["sensitiveData"], manufacturer_record["sensitiveData"])
+        get_data.assert_called_once_with("TACW2244723S0930")
+
+        with patch("server.get_chargedot_data") as get_data:
+            remote_status, remote_payload = self.request_json(
+                "GET",
+                "/api/chargedot/charger?serialNumber=TACW2244723S0930",
+                origin="https://attacker.example",
+            )
+
+        self.assertEqual(remote_status, 403)
+        self.assertFalse(remote_payload["ok"])
+        get_data.assert_not_called()
+
+    def test_kubernetes_status_and_pod_inventory_are_available_to_local_ui(self):
+        pod_inventory = {
+            "env": "prod",
+            "namespace": "all",
+            "summary": {"total": 1, "healthy": 1},
+            "pods": [{"namespace": "tme-ns-ev-backend-prd", "name": "api-0", "health": "Healthy"}],
+        }
+        infrastructure = {"env": "prod", "namespace": "all", "nodes": [{"name": "node-1"}]}
+        with patch("server.get_kubernetes_credential_status", return_value={
+            "env": "prod", "authenticated": True, "status": "ready"
+        }) as get_status, patch("server.list_kubernetes_pods", return_value=pod_inventory) as get_pods, patch(
+            "server.get_kubernetes_node_infrastructure", return_value=infrastructure
+        ) as get_infrastructure:
+            status_code, status_payload = self.request_json("GET", "/api/kubernetes/status?env=prod")
+            pods_code, pods_payload = self.request_json(
+                "GET", "/api/kubernetes/pods?env=prod&namespace=all"
+            )
+            infra_code, infra_payload = self.request_json(
+                "GET", "/api/kubernetes/infrastructure?env=prod&namespace=all"
+            )
+            forced_code, _ = self.request_json(
+                "GET", "/api/kubernetes/infrastructure?env=prod&namespace=all&refresh=true"
+            )
+
+        self.assertEqual(status_code, 200)
+        self.assertTrue(status_payload["authenticated"])
+        self.assertEqual(pods_code, 200)
+        self.assertEqual(pods_payload["pods"][0]["name"], "api-0")
+        self.assertEqual(infra_code, 200)
+        self.assertEqual(infra_payload["nodes"][0]["name"], "node-1")
+        self.assertEqual(forced_code, 200)
+        get_status.assert_called_once_with("prod")
+        get_pods.assert_called_once_with("prod", "all")
+        self.assertEqual([call.args for call in get_infrastructure.call_args_list], [("prod", "all", False), ("prod", "all", True)])
+
+    def test_kubernetes_routes_reject_remote_origins_before_aws_access(self):
+        with patch("server.get_kubernetes_credential_status") as get_status, \
+                patch("server.list_kubernetes_pods") as get_pods, \
+            patch("server.get_kubernetes_node_infrastructure") as get_infrastructure, \
+                patch("server.start_kubernetes_sso_login") as start_login:
+            status_code, _ = self.request_json(
+                "GET", "/api/kubernetes/status?env=prod", origin="https://attacker.example"
+            )
+            pods_code, _ = self.request_json(
+                "GET", "/api/kubernetes/pods?env=prod&cluster=backend", origin="https://attacker.example"
+            )
+            infra_code, _ = self.request_json(
+                "GET", "/api/kubernetes/infrastructure?env=prod&namespace=all", origin="https://attacker.example"
+            )
+            login_code, _ = self.request_json(
+                "POST", "/api/kubernetes/login?env=prod", origin="https://attacker.example"
+            )
+
+        self.assertEqual((status_code, pods_code, infra_code, login_code), (403, 403, 403, 403))
+        get_status.assert_not_called()
+        get_pods.assert_not_called()
+        get_infrastructure.assert_not_called()
+        start_login.assert_not_called()
+
+    def test_kubernetes_login_starts_sso_for_the_selected_environment(self):
+        with patch("server.start_kubernetes_sso_login", return_value={
+            "env": "acc", "started": True
+        }) as start_login:
+            status_code, payload = self.request_json("POST", "/api/kubernetes/login?env=acc")
+
+        self.assertEqual(status_code, 200)
+        self.assertTrue(payload["started"])
+        start_login.assert_called_once_with("acc")
 
     def test_token_routes_reject_remote_origins_before_reading_token(self):
         with patch("server.read_saved_token") as read_token, \

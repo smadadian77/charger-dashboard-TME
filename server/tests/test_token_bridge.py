@@ -4,7 +4,7 @@ import os
 import tempfile
 import unittest
 from types import SimpleNamespace
-from unittest.mock import patch
+from unittest.mock import call, patch
 
 import tme_token_bridge as bridge
 from tme_token_bridge import (
@@ -115,6 +115,44 @@ class TokenBridgeExtractionTests(unittest.TestCase):
             with self.assertRaises(StopPolling):
                 bridge.main()
         open_tab.assert_not_called()
+
+    def test_normal_capture_uses_existing_browser_storage_flow(self):
+        with patch.object(bridge, "NO_BROWSER", False), \
+                patch.object(bridge, "run_external_browser_capture", return_value=0) as external_capture, \
+                patch.object(bridge, "run_playwright_capture") as playwright_capture:
+            self.assertEqual(bridge.main(), 0)
+
+        external_capture.assert_called_once_with()
+        playwright_capture.assert_not_called()
+
+    def test_existing_live_token_is_checked_before_opening_new_tab(self):
+        token = synthetic_tme_jwt(1_900_000_000)
+        with patch.object(bridge, "NO_BROWSER", False), \
+                patch.object(bridge, "FORCE", True), \
+                patch.object(bridge, "find_dashboard_token", return_value=token), \
+                patch.object(bridge, "save_token_to_local_server", return_value=(200, "{\"ok\":true}")), \
+                patch.object(bridge, "open_tme_tab") as open_tab:
+            self.assertEqual(bridge.run_external_browser_capture(), 0)
+
+        open_tab.assert_not_called()
+
+    def test_tme_page_opens_as_a_new_tab_in_the_default_browser(self):
+        with patch("webbrowser.open", return_value=True) as open_url:
+            self.assertTrue(bridge.open_tme_tab())
+
+        open_url.assert_called_once_with(bridge.TME_URL, new=2)
+
+    def test_fota_page_gets_one_same_window_retry_when_token_is_not_found(self):
+        token = synthetic_tme_jwt(1_900_000_000)
+        with patch.object(bridge, "APP", "fota"), \
+                patch.object(bridge, "NO_BROWSER", False), \
+                patch.object(bridge, "find_dashboard_token", side_effect=[None] * 10 + [token]), \
+                patch.object(bridge, "open_tme_tab", side_effect=[True, True]) as open_tab, \
+                patch.object(bridge, "save_token_to_local_server", return_value=(200, "{\"ok\":true}")), \
+                patch.object(bridge.time, "sleep"):
+            self.assertEqual(bridge.run_external_browser_capture(), 0)
+
+        self.assertEqual(open_tab.call_args_list, [call(), call(new=0)])
 
     def test_stale_process_query_is_scoped_to_the_environment_profile(self):
         profile_root = r"C:\Local App Data\TMEWallboxBridge_ACC"

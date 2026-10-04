@@ -76,18 +76,22 @@
               <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2.2"><path d="M18 20V10M12 20V4M6 20v-6"/></svg>
               <span>OPS Analytics</span>
             </button>
+            <button type="button" class="topbar-ops-pill" id="topbarKubernetesBtn" title="Kubernetes pod health">
+              <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M12 2.8 20 7.4v9.2l-8 4.6-8-4.6V7.4z"/><path d="M12 7v10M7.7 9.4l8.6 5.2m0-5.2-8.6 5.2"/></svg>
+              <span>Kubernetes</span>
+            </button>
             <a class="topbar-ops-pill" href="/fota/packages" [class.active]="isFotaRoute" [attr.aria-current]="isFotaRoute ? 'page' : null" title="Firmware on the air management">
               <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 3v12m0 0 4-4m-4 4-4-4"/><path d="M5 17v3h14v-3"/></svg>
               <span>FOTA</span>
             </a>
             <div class="topbar-nav-item has-popover" id="topbarSupportNavItem">
-              <button type="button" class="topbar-nav-link" id="topbarSupportLink" aria-haspopup="dialog" aria-expanded="false" title="Customer Support & Fleet Assistance">
+              <button type="button" class="topbar-nav-link" id="topbarSupportLink" aria-label="Customer Support & Fleet Assistance" aria-haspopup="dialog" aria-expanded="false" title="Customer Support & Fleet Assistance">
                 <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2">
                   <circle cx="12" cy="12" r="10"/>
                   <path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3"/>
                   <line x1="12" y1="17" x2="12.01" y2="17"/>
                 </svg>
-                <span>Customer Support</span>
+                <span>Support</span>
                 <svg class="nav-chevron" viewBox="0 0 24 24" width="10" height="10" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="6 9 12 15 18 9"/></svg>
               </button>
               <div class="topbar-popover" role="tooltip" id="customerSupportPopover" aria-label="Customer Support Details">
@@ -829,6 +833,20 @@
         </article>
       </section>
 
+      <section class="panel manufacturer-data-panel" aria-labelledby="manufacturerDataHeading">
+        <details class="manufacturer-data-disclosure">
+          <summary class="manufacturer-data-summary">
+            <span class="manufacturer-data-title">
+              <h2 id="manufacturerDataHeading">Manufacturer data</h2>
+              <span class="manufacturer-data-brand">ChargeDot</span>
+            </span>
+            <span id="manufacturerDataSummary" class="manufacturer-data-primary">Load a charger to view key details.</span>
+            <span id="manufacturerDataStatus" class="manufacturer-data-status" role="status" aria-live="polite">Waiting for charger.</span>
+          </summary>
+          <div id="manufacturerDataContent" class="manufacturer-data-content"></div>
+        </details>
+      </section>
+
       <section id="chargingSessionsPanel" class="panel">
         <div class="panel-header">
           <h2>Charging sessions</h2>
@@ -1324,6 +1342,274 @@
             </button>
           </div>
         </section>
+      </main>
+
+      <main id="kubernetesPodsView" class="kubernetes-view" hidden>
+        <section class="kubernetes-heading">
+          <div class="kubernetes-heading-copy">
+            <p class="kubernetes-eyebrow">PRODUCTION OPERATIONS <span></span> SERVICE OBSERVABILITY</p>
+            <h2>Production services</h2>
+            <p class="kubernetes-subtitle">Live signals from the two approved production namespaces.</p>
+          </div>
+          <div class="kubernetes-controls">
+            <label>
+              <span>Namespace scope</span>
+              <select id="kubernetesNamespaceSelect" aria-label="Kubernetes namespace scope">
+                <option value="all">Both production namespaces</option>
+                <option value="tme-ns-ev-backend-prd">tme-ns-ev-backend-prd</option>
+                <option value="tme-ns-ev-virtual-gateway-prd">tme-ns-ev-virtual-gateway-prd</option>
+              </select>
+            </label>
+            <label>
+              <span>Time window</span>
+              <select id="kubernetesTimeRange" aria-label="Observability time window">
+                <option value="15m">15 minutes</option>
+                <option value="1h" selected>1 hour</option>
+                <option value="6h">6 hours</option>
+                <option value="24h">24 hours</option>
+              </select>
+            </label>
+            <button type="button" class="kubernetes-refresh-button" id="kubernetesRefreshBtn" title="Refresh production pod data" aria-label="Refresh production pod data">
+              <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2"><path d="M21.5 2v6h-6M21.3 15.6A10 10 0 1 1 20.9 7l.6 1"/></svg>
+            </button>
+          </div>
+        </section>
+
+        <section id="kubernetesAuthPanel" class="kubernetes-auth-panel" hidden aria-live="polite">
+          <div class="kubernetes-auth-mark" aria-hidden="true">
+            <span id="kubernetesAuthSpinner" class="kubernetes-auth-spinner" hidden></span>
+            <svg viewBox="0 0 24 24" width="26" height="26" fill="none" stroke="currentColor" stroke-width="1.7"><path d="M12 3 20 7.5v9L12 21l-8-4.5v-9z"/><path d="M9 12h6m-3-3v6"/></svg>
+          </div>
+          <div class="kubernetes-auth-copy">
+            <span class="kubernetes-eyebrow">AWS SSO SESSION</span>
+            <h3 id="kubernetesAuthTitle">Checking AWS access</h3>
+            <p id="kubernetesAuthMessage">Verifying the read-only profile for this environment.</p>
+            <a href="https://d-9367069bf9.awsapps.com/start/#/" target="_blank" rel="noopener noreferrer" class="kubernetes-portal-link">Open AWS access portal</a>
+          </div>
+          <button type="button" id="kubernetesLoginBtn" class="kubernetes-login-button" hidden>
+            <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 3h7v7m-11 4L21 3M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/></svg>
+            <span>Start AWS SSO sign-in</span>
+          </button>
+        </section>
+
+        <section id="kubernetesLoadingPanel" class="kubernetes-loading-panel" hidden role="status" aria-live="polite">
+          <span class="kubernetes-loading-spinner" aria-hidden="true"></span>
+          <div class="kubernetes-loading-copy">
+            <strong>Loading pod inventory</strong>
+            <span>Connecting to the selected EKS cluster...</span>
+          </div>
+          <span class="kubernetes-loading-skeleton" aria-hidden="true"></span>
+        </section>
+
+        <p id="kubernetesErrorMessage" class="kubernetes-error-message" role="alert" hidden></p>
+        <p id="kubernetesAvailabilityNotice" class="kubernetes-availability-notice" role="status" hidden></p>
+
+        <div id="kubernetesDataView" hidden>
+          <section class="kubernetes-summary-grid" aria-label="Production service health">
+            <article class="kubernetes-summary-item critical"><span class="kubernetes-summary-label">Critical</span><strong id="kubernetesCriticalServiceCount">--</strong><span>Services with unavailable modules or infrastructure</span></article>
+            <article class="kubernetes-summary-item warning"><span class="kubernetes-summary-label">Warning</span><strong id="kubernetesWarningServiceCount">--</strong><span>Degraded replicas or recent warning signals</span></article>
+            <article class="kubernetes-summary-item"><span class="kubernetes-summary-label">Healthy</span><strong id="kubernetesHealthyServiceCount">--</strong><span>All observed replicas available</span></article>
+            <article class="kubernetes-summary-item"><span class="kubernetes-summary-label">Affected services</span><strong id="kubernetesAffectedServiceCount">--</strong><span>Critical or warning state</span></article>
+          </section>
+
+          <section class="kubernetes-panel kubernetes-service-catalog" aria-labelledby="kubernetesServiceCatalogTitle">
+            <div class="kubernetes-panel-heading kubernetes-catalog-heading">
+              <div><h3 id="kubernetesServiceCatalogTitle">Services</h3><p id="kubernetesServiceCatalogMeta">Grouped from live Kubernetes workload metadata</p></div>
+              <div class="kubernetes-service-tools">
+                <label class="kubernetes-search-label">
+                  <span class="sr-only">Search services, modules, pods, containers, or nodes</span>
+                  <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/></svg>
+                  <input id="kubernetesGlobalSearch" type="search" placeholder="Search service, module, pod, node" autocomplete="off" />
+                </label>
+                <label class="kubernetes-sort-label"><span>Sort</span>
+                  <select id="kubernetesServiceSort" aria-label="Sort services">
+                    <option value="attention">Needs attention</option>
+                    <option value="health">Health</option>
+                    <option value="issue">Most recent issue</option>
+                    <option value="activity">Restart / event activity</option>
+                    <option value="cpu">CPU</option>
+                    <option value="memory">Memory</option>
+                    <option value="name">Service name</option>
+                  </select>
+                </label>
+                <label class="kubernetes-sort-label"><span>Health</span>
+                  <select id="kubernetesServiceHealthFilter" aria-label="Filter services by health">
+                    <option value="">All health states</option>
+                    <option value="Critical">Critical</option>
+                    <option value="Warning">Warning</option>
+                    <option value="Healthy">Healthy</option>
+                    <option value="Unknown">Unknown / no data</option>
+                  </select>
+                </label>
+              </div>
+            </div>
+            <div id="kubernetesServiceGrid" class="kubernetes-service-grid" aria-live="polite"></div>
+            <p id="kubernetesServiceEmptyState" class="kubernetes-chart-empty" hidden>No services match this search or source availability is insufficient.</p>
+          </section>
+
+          <section id="kubernetesServiceDetail" class="kubernetes-panel kubernetes-service-detail" aria-labelledby="kubernetesServiceDetailTitle" hidden>
+            <header class="kubernetes-service-detail-heading">
+              <div>
+                <div class="kubernetes-service-detail-kicker"><span id="kubernetesServiceDetailNamespace"></span><span id="kubernetesServiceDetailHealth" class="kubernetes-service-health"></span></div>
+                <h3 id="kubernetesServiceDetailTitle">Service investigation</h3>
+                <p id="kubernetesServiceDetailSubtitle"></p>
+              </div>
+              <button type="button" id="kubernetesServiceDetailClose" class="kubernetes-pod-dialog-close" aria-label="Close service details" title="Close service details">
+                <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2"><path d="m18 6-12 12M6 6l12 12"/></svg>
+              </button>
+            </header>
+            <section class="kubernetes-detail-section" aria-labelledby="kubernetesServiceModulesTitle">
+              <h4 id="kubernetesServiceModulesTitle">Modules</h4>
+              <div id="kubernetesServiceModules" class="kubernetes-service-modules"></div>
+            </section>
+            <div id="kubernetesServiceInsights" class="kubernetes-service-insights" aria-live="polite"></div>
+            <section class="kubernetes-detail-section" aria-labelledby="kubernetesServiceTimelineTitle">
+              <h4 id="kubernetesServiceTimelineTitle">Service timeline</h4>
+              <div id="kubernetesServiceTimeline" class="kubernetes-operational-timeline" aria-label="Selected service timeline"></div>
+            </section>
+            <div class="kubernetes-service-detail-grid">
+              <section class="kubernetes-detail-section" aria-labelledby="kubernetesServiceEventsTitle">
+                <h4 id="kubernetesServiceEventsTitle">Evidence and events</h4>
+                <ol id="kubernetesServiceEvents" class="kubernetes-service-events"></ol>
+              </section>
+              <section class="kubernetes-detail-section" aria-labelledby="kubernetesServiceNodesTitle">
+                <h4 id="kubernetesServiceNodesTitle">Hosting nodes</h4>
+                <div id="kubernetesServiceNodes" class="kubernetes-service-nodes"></div>
+              </section>
+            </div>
+            <section class="kubernetes-detail-section" aria-labelledby="kubernetesServiceLogsTitle">
+              <div class="kubernetes-logs-heading"><div><h4 id="kubernetesServiceLogsTitle">Service logs</h4><p id="kubernetesServiceLogsMeta">Choose a module pod to load bounded container logs.</p></div><button id="kubernetesServiceLogsLiveToggle" class="kubernetes-live-toggle" type="button" aria-pressed="false">Start live</button></div>
+              <div class="kubernetes-logs-controls">
+                <label><span>Module / pod</span><select id="kubernetesServiceLogPod" aria-label="Service module and pod"></select></label>
+                <label><span>Container</span><select id="kubernetesServiceLogContainer" aria-label="Service log container"><option value="">All containers</option></select></label>
+                <label><span>Instance</span><select id="kubernetesServiceLogInstance" aria-label="Current or previous service container"><option value="current">Current</option><option value="previous">Previous</option></select></label>
+                <label><span>Window</span><select id="kubernetesServiceLogWindow" aria-label="Service log time window"><option value="15m">15 minutes</option><option value="1h" selected>1 hour</option><option value="6h">6 hours</option><option value="24h">24 hours</option></select></label>
+                <label><span>Show</span><select id="kubernetesServiceLogFilter" aria-label="Filter service log severity"><option value="all">All lines</option><option value="error">Errors</option><option value="warning">Warnings</option></select></label>
+                <button id="kubernetesServiceLogsRefresh" type="button" class="kubernetes-secondary-button">Load logs</button>
+              </div>
+              <pre id="kubernetesServiceLogs" class="kubernetes-pod-logs" tabindex="0" aria-label="Service container logs">Select a module pod and load recent logs.</pre>
+            </section>
+            <section class="kubernetes-detail-section" aria-labelledby="kubernetesServicePodsTitle">
+              <div class="kubernetes-pods-heading"><div><h4 id="kubernetesServicePodsTitle">Pods by module</h4><p id="kubernetesServicePodsMeta"></p></div></div>
+              <div id="kubernetesServicePods" class="kubernetes-service-pods"></div>
+            </section>
+            <p class="kubernetes-data-note">Request rate, application error rate, and latency are not available from the connected sources. CPU and memory are current Kubernetes Metrics API samples; EC2 CPU history is shown only where CloudWatch returned datapoints.</p>
+          </section>
+
+          <section class="kubernetes-panel kubernetes-timeline-panel" aria-labelledby="kubernetesTimelineTitle">
+            <div class="kubernetes-panel-heading">
+              <div><h3 id="kubernetesTimelineTitle">Recent activity</h3><p>One time axis for observed Kubernetes, container, metric, log, and AWS signals</p></div>
+              <div class="kubernetes-timeline-filters">
+                <label><span>Source</span><select id="kubernetesTimelineSourceFilter" aria-label="Filter timeline source"><option value="all">All sources</option><option value="kubernetes">Kubernetes</option><option value="pods">Pods</option><option value="containers">Containers</option><option value="logs">Logs</option><option value="metrics">Metrics</option><option value="aws">AWS</option></select></label>
+                <label><span>Severity</span><select id="kubernetesTimelineSeverityFilter" aria-label="Filter timeline severity"><option value="all">All severity</option><option value="critical">Critical</option><option value="warning">Warning</option><option value="info">Info</option></select></label>
+              </div>
+            </div>
+            <div id="kubernetesOperationalTimeline" class="kubernetes-operational-timeline" aria-label="Unified production operations timeline"></div>
+            <p id="kubernetesTimelineNote" class="kubernetes-data-note"></p>
+          </section>
+
+          <details class="kubernetes-pods-panel kubernetes-all-pods">
+            <summary class="kubernetes-pods-heading"><span><strong>Detailed pod inventory</strong><small id="kubernetesTableMeta">Open for pod-level investigation</small></span></summary>
+            <div class="kubernetes-pods-investigation">
+              <div class="kubernetes-filter-controls">
+                <label class="kubernetes-search-label">
+                  <span class="sr-only">Search pods</span>
+                  <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/></svg>
+                  <input id="kubernetesSearchInput" type="search" placeholder="Search pod, container or node" autocomplete="off" />
+                </label>
+                <select id="kubernetesHealthFilter" aria-label="Filter by pod health">
+                  <option value="">All health states</option>
+                  <option value="Healthy">Healthy</option>
+                  <option value="Not ready">Not ready</option>
+                  <option value="Pending">Pending</option>
+                  <option value="Failed">Failed</option>
+                  <option value="Completed">Completed</option>
+                  <option value="Unknown">Unknown</option>
+                </select>
+                <select id="kubernetesPodSort" aria-label="Sort pods">
+                  <option value="health">Health</option>
+                  <option value="restarts">Restarts</option>
+                  <option value="cpu">CPU</option>
+                  <option value="memory">Memory</option>
+                  <option value="name">Pod name</option>
+                  <option value="node">Node</option>
+                  <option value="service">Service / module</option>
+                </select>
+              </div>
+            <div class="kubernetes-table-wrap">
+              <table class="kubernetes-pods-table">
+                <thead>
+                  <tr>
+                    <th scope="col">Namespace</th>
+                    <th scope="col">Pod / container</th>
+                    <th scope="col">Health</th>
+                    <th scope="col">Ready</th>
+                    <th scope="col">Restarts</th>
+                    <th scope="col">CPU</th>
+                    <th scope="col">Memory</th>
+                    <th scope="col">Node</th>
+                    <th scope="col">Age</th>
+                  </tr>
+                </thead>
+                <tbody id="kubernetesPodsTableBody"></tbody>
+              </table>
+              <p id="kubernetesEmptyState" class="kubernetes-empty-state" hidden>No pods match this scope.</p>
+            </div>
+            </div>
+          </details>
+        </div>
+
+        <dialog id="kubernetesPodDetailDialog" class="kubernetes-pod-dialog" aria-labelledby="kubernetesPodDetailTitle">
+          <div class="kubernetes-pod-dialog-body">
+            <header class="kubernetes-pod-dialog-heading">
+              <div>
+                <span class="kubernetes-eyebrow">POD INSIGHT</span>
+                <h3 id="kubernetesPodDetailTitle">Pod details</h3>
+                <p id="kubernetesPodDetailSubtitle"></p>
+              </div>
+              <button type="button" id="kubernetesPodDetailClose" class="kubernetes-pod-dialog-close" aria-label="Close pod details" title="Close">
+                <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2"><path d="m18 6-12 12M6 6l12 12"/></svg>
+              </button>
+            </header>
+            <dl id="kubernetesPodDetailMetrics" class="kubernetes-pod-detail-metrics"></dl>
+            <section class="kubernetes-detail-section">
+              <h4>Containers</h4>
+              <div id="kubernetesPodDetailContainers" class="kubernetes-container-list"></div>
+            </section>
+            <section class="kubernetes-detail-section kubernetes-detail-timeline-section">
+              <h4>Pod timeline</h4>
+              <div id="kubernetesPodDetailTimeline" class="kubernetes-operational-timeline"></div>
+            </section>
+            <div class="kubernetes-detail-columns">
+              <section class="kubernetes-detail-section">
+                <h4>Conditions</h4>
+                <div id="kubernetesPodDetailConditions" class="kubernetes-pod-detail-list"></div>
+              </section>
+              <section class="kubernetes-detail-section">
+                <h4>Related events</h4>
+                <div id="kubernetesPodDetailEvents" class="kubernetes-pod-detail-list"></div>
+              </section>
+            </div>
+            <section class="kubernetes-detail-section">
+              <h4>Ownership &amp; labels</h4>
+              <div id="kubernetesPodDetailMetadata" class="kubernetes-pod-detail-list"></div>
+            </section>
+            <section class="kubernetes-detail-section kubernetes-logs-section">
+              <div class="kubernetes-logs-heading">
+                <div><h4>Container logs</h4><p id="kubernetesLogsMeta">Logs load only when a pod is opened.</p></div>
+                <button id="kubernetesLogsLiveToggle" class="kubernetes-live-toggle" type="button" aria-pressed="false">Start live</button>
+              </div>
+              <div class="kubernetes-logs-controls">
+                <label><span>Container</span><select id="kubernetesLogContainer" aria-label="Log container"></select></label>
+                <label><span>Instance</span><select id="kubernetesLogInstance" aria-label="Current or previous container"><option value="current">Current</option><option value="previous">Previous</option></select></label>
+                <label><span>Window</span><select id="kubernetesLogWindow" aria-label="Log time window"><option value="15m">15 minutes</option><option value="1h" selected>1 hour</option><option value="6h">6 hours</option><option value="24h">24 hours</option></select></label>
+                <label><span>Show</span><select id="kubernetesLogFilter" aria-label="Filter log severity"><option value="all">All lines</option><option value="error">Errors</option><option value="warning">Warnings</option></select></label>
+                <button id="kubernetesLogsRefresh" type="button" class="kubernetes-secondary-button">Load logs</button>
+              </div>
+              <pre id="kubernetesPodLogs" class="kubernetes-pod-logs" tabindex="0" aria-label="Pod container logs">Select a container and load recent logs.</pre>
+            </section>
+          </div>
+        </dialog>
       </main>
 
       <!-- Floating Time Selection Toolbar (Charger Dashboard View Only) -->

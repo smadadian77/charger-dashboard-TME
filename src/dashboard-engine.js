@@ -16,12 +16,46 @@ const MSAL_CONFIG = {
 const state = {
   currentEnv: localStorage.getItem('wallbox_env') || 'prod',
   currentView: 'fleet',
+  kubernetes: {
+    env: 'prod',
+    namespace: 'all',
+    timeRange: '1h',
+    timelineWindow: null,
+    auth: 'idle',
+    result: null,
+    error: '',
+    requestId: 0,
+    inventoryLoading: false,
+    authRequestId: 0,
+    logRequestId: 0,
+    activePod: null,
+    activeServiceKey: '',
+    serviceModels: [],
+    infrastructure: null,
+    infrastructureError: '',
+    infrastructureRequestId: 0,
+    infrastructureFetchedAt: 0,
+    infrastructureNamespace: '',
+    infrastructureLoading: false,
+    logTarget: 'pod',
+    logPod: null,
+    logSnapshot: null,
+    logLoading: false,
+    logAbortController: null,
+    logError: '',
+    logTimer: null,
+    authPollTimer: null,
+    refreshTimer: null,
+  },
   fleet: {
     items: [],
     page: 0,
     size: 10,
     totalPages: 0,
-    totalElements: 33327,
+    totalElements: 0,
+    totalEnvironment: '',
+    availableElements: null,
+    availableEnvironment: '',
     loading: false,
     error: null,
     filters: {
@@ -70,6 +104,7 @@ const state = {
   msalApp: null,
   tokenRefreshInProgress: false,
   searchId: 0,
+  chargeDotRequestId: 0,
   loadingCards: {},
   sourceStatus: {
     wallbox: 'idle',
@@ -193,7 +228,7 @@ function renderEventIngestionProgress({ page, maxPages, count, oldest, windowSta
 
   const wStart = windowStart || (windowEnd ? windowEnd - 30 * 86400000 : Date.now() - 30 * 86400000);
   const wEnd = windowEnd || Date.now();
-  const timeProgress = oldest ? Math.min(96, Math.max(8, Math.round(((wEnd - oldest) / Math.max(wEnd - wStart, 1)) * 100))) : Math.min(90, Math.round(((page + 1) / maxPages) * 100));
+    const timeProgress = oldest ? Math.min(96, Math.max(8, Math.round(((wEnd - oldest) / Math.max(wEnd - wStart, 1)) * 100))) : Math.min(90, Math.round(((page + 1) / maxPages) * 100));
   const pageProgress = Math.min(96, Math.round(((page + 1) / maxPages) * 100));
   const progressPercent = Math.max(timeProgress, pageProgress);
 
@@ -446,10 +481,7 @@ function renderLegend() {
   }
 
   const entries = Object.entries(typeLabels).map(([type, label]) => `
-    <span class="legend-item">
-      <span class="legend-swatch" style="background:${typeColors[type] || typeColors.Unknown};"></span>
-      ${label}
-    </span>
+    <span class="legend-item"><span class="legend-swatch" style="background:${typeColors[type] || typeColors.UNKNOWN};"></span>${escapeHtml(label)}</span>
   `).join('');
 
   legend.innerHTML = entries;
@@ -6337,6 +6369,141 @@ async function fetchEventPages(serialNumber, token, startTime, endTime, searchId
   };
 }
 
+function chargeDotValueText(value) {
+  if (Array.isArray(value)) {
+    return value.map((item) => item && typeof item === 'object' ? JSON.stringify(item) : String(item)).join(', ');
+  }
+  return value && typeof value === 'object' ? JSON.stringify(value) : String(value ?? '');
+}
+
+function appendManufacturerDataField(list, label, value, sensitive = false) {
+  if (value == null || value === '') return;
+  const row = document.createElement('div');
+  const term = document.createElement('dt');
+  const detail = document.createElement('dd');
+  const valueNode = document.createElement('span');
+  const text = chargeDotValueText(value);
+  term.textContent = label;
+  valueNode.textContent = sensitive ? '********' : text;
+  detail.append(valueNode);
+
+  if (sensitive) {
+    const revealButton = document.createElement('button');
+    revealButton.type = 'button';
+    revealButton.className = 'manufacturer-data-reveal';
+    revealButton.textContent = 'Show';
+    revealButton.setAttribute('aria-label', `Reveal ${label}`);
+    revealButton.addEventListener('click', () => {
+      const revealed = revealButton.textContent === 'Show';
+      valueNode.textContent = revealed ? text : '********';
+      revealButton.textContent = revealed ? 'Hide' : 'Show';
+      revealButton.setAttribute('aria-label', `${revealed ? 'Hide' : 'Reveal'} ${label}`);
+    });
+    detail.append(revealButton);
+  }
+
+  row.append(term, detail);
+  list.append(row);
+}
+
+function renderManufacturerData(record, serialNumber) {
+  const content = document.getElementById('manufacturerDataContent');
+  const status = document.getElementById('manufacturerDataStatus');
+  const primary = document.getElementById('manufacturerDataSummary');
+  if (!content || !status || !primary) return;
+
+  content.replaceChildren();
+  status.textContent = `ChargeDot record for ${serialNumber}`;
+  primary.textContent = [
+    record.hardwareModel || record.model,
+    record.firmwareVersion,
+    record.ratedPower != null ? formatPowerWatts(record.ratedPower) : '',
+  ].filter(Boolean).join(' · ') || 'Manufacturer details available';
+
+  const groups = [
+    {
+      title: 'Manufacturer specifications',
+      fields: [
+        ['siteId', 'Site ID'],
+        ['model', 'Model'],
+        ['hardwareModel', 'Hardware model'],
+        ['partNumber', 'Part number'],
+        ['hardwareVersion', 'Hardware version'],
+        ['firmwareVersion', 'Firmware version'],
+        ['ratedPower', 'Rated power'],
+        ['ratedCurrent', 'Rated current'],
+        ['netModule', 'Network module'],
+        ['protocolType', 'Protocol'],
+        ['protocolVersion', 'Protocol version'],
+      ],
+    },
+    {
+      title: 'Sensitive data',
+      fields: [
+        ['pinCode', 'Pass / PIN'],
+        ['imei', 'SIM IMEI'],
+        ['iccid', 'SIM ICCID'],
+        ['preProgrammedRfidCards', 'Pre-programmed RFID cards'],
+      ],
+      sensitive: true,
+    },
+  ];
+
+  for (const group of groups) {
+    const entries = group.fields.filter(([key]) => Object.hasOwn(group.sensitive ? record.sensitiveData || {} : record, key));
+    if (!entries.length) continue;
+    const section = document.createElement('section');
+    section.className = 'manufacturer-data-group';
+    const heading = document.createElement('h3');
+    const list = document.createElement('dl');
+    heading.textContent = group.title;
+    section.append(heading, list);
+    for (const [key, label] of entries) {
+      const source = group.sensitive ? record.sensitiveData : record;
+      appendManufacturerDataField(list, label, source[key], Boolean(group.sensitive));
+    }
+    content.append(section);
+  }
+
+  if (!content.childElementCount) {
+    const empty = document.createElement('p');
+    empty.className = 'manufacturer-data-empty';
+    empty.textContent = 'No manufacturer fields are available for this charger.';
+    content.append(empty);
+  }
+}
+
+async function loadManufacturerData(serialNumber) {
+  const requestId = ++state.chargeDotRequestId;
+  const status = document.getElementById('manufacturerDataStatus');
+  const content = document.getElementById('manufacturerDataContent');
+  if (!status || !content) return;
+  status.textContent = 'Loading ChargeDot data...';
+  content.replaceChildren();
+
+  try {
+    const params = new URLSearchParams({ serialNumber });
+    const response = await fetch(dashboardApiUrl(`/api/chargedot/charger?${params.toString()}`));
+    if (!response.headers.get('content-type')?.includes('application/json')) {
+      if (requestId === state.chargeDotRequestId) {
+        status.textContent = 'ChargeDot API route is unavailable. Restart the dashboard server.';
+      }
+      return;
+    }
+    const result = await response.json();
+    if (requestId !== state.chargeDotRequestId
+      || document.getElementById('serialNumber')?.value.trim() !== serialNumber) return;
+    if (!response.ok || !result?.ok || !result.data) {
+      status.textContent = result?.message || 'ChargeDot data could not be loaded.';
+      return;
+    }
+    renderManufacturerData(result.data, serialNumber);
+  } catch (error) {
+    if (requestId !== state.chargeDotRequestId) return;
+    status.textContent = 'ChargeDot data could not be reached. Check the dashboard server connection.';
+  }
+}
+
 async function fetchEvents() {
   const serialNumber = document.getElementById('serialNumber').value.trim();
   const token = String(state.token || '').replace(/^Bearer\s+/i, '').trim();
@@ -6354,12 +6521,16 @@ async function fetchEvents() {
     return;
   }
 
+  void loadManufacturerData(serialNumber);
+
   const rangeError = rangeValidationMessage();
   if (rangeError) {
     updateRangeFeedback();
     setStatus(rangeError, 'warning');
     return;
   }
+
+  updateActiveChargerBadge(serialNumber);
 
   state.eventBounds = {
     start: new Date(startTime).getTime(),
@@ -7091,7 +7262,7 @@ function chargerFacts(wallbox) {
       ['Peaks', formatPeaks(wallbox.peaks)],
     ]],
     ['Access', [
-      ['Owner PIN', wallbox.ownerPin, '', true],
+      ['Owner PIN', wallbox.ownerPin, '', true, '', true],
     ]],
   ];
 }
@@ -7215,27 +7386,52 @@ function renderChargerProfile() {
       </span>
     `).join('')}
   `;
+  const ownerPinValues = [];
   profile.innerHTML = `
     ${chargerFacts(wallbox).map(([title, rows]) => `
       <section class="charger-group">
         <h3>${escapeHtml(title)}</h3>
         <dl>
-          ${(rows.length ? rows : [['None', '—']]).map(([label, value, tone, copyable, place]) => `
-            <div class="${place || ''}">
-              <dt>${escapeHtml(label)}</dt>
-              <dd>
-                ${tone ? `<span class="status-pill tone-${tone}">${escapeHtml(displayValue(value))}</span>` : escapeHtml(displayValue(value))}
-                ${copyable ? `<button type="button" class="copy-pin" data-pin="${escapeHtml(displayValue(value))}">Copy</button>` : ''}
-              </dd>
-            </div>
-          `).join('')}
+          ${(rows.length ? rows : [['None', '—']]).map(([label, value, tone, copyable, place, sensitive]) => {
+            let renderedValue = tone
+              ? `<span class="status-pill tone-${tone}">${escapeHtml(displayValue(value))}</span>`
+              : escapeHtml(displayValue(value));
+            let controls = '';
+            let secretIndex = null;
+            if (sensitive && value != null && value !== '') {
+              secretIndex = ownerPinValues.push(displayValue(value)) - 1;
+              renderedValue = `<span data-owner-pin-value="${secretIndex}">********</span>`;
+              controls += `<button type="button" class="manufacturer-data-reveal reveal-owner-pin" data-secret-index="${secretIndex}" aria-label="Reveal owner PIN">Show</button>`;
+            }
+            if (copyable && (!sensitive || secretIndex != null)) {
+              controls += sensitive
+                ? `<button type="button" class="copy-pin" data-secret-index="${secretIndex}">Copy</button>`
+                : `<button type="button" class="copy-pin" data-pin="${escapeHtml(displayValue(value))}">Copy</button>`;
+            }
+            return `
+              <div class="${place || ''}">
+                <dt>${escapeHtml(label)}</dt>
+                <dd>${renderedValue}${controls}</dd>
+              </div>
+            `;
+          }).join('')}
         </dl>
       </section>
     `).join('')}
   `;
+  profile.querySelectorAll('.reveal-owner-pin').forEach((button) => {
+    const valueNode = profile.querySelector(`[data-owner-pin-value="${button.dataset.secretIndex}"]`);
+    button.addEventListener('click', () => {
+      const revealed = button.textContent === 'Show';
+      if (valueNode) valueNode.textContent = revealed ? ownerPinValues[Number(button.dataset.secretIndex)] : '********';
+      button.textContent = revealed ? 'Hide' : 'Show';
+      button.setAttribute('aria-label', `${revealed ? 'Hide' : 'Reveal'} owner PIN`);
+    });
+  });
   profile.querySelectorAll('.copy-pin').forEach((button) => {
     button.addEventListener('click', async () => {
-      const pin = button.dataset.pin || '';
+      const secretIndex = button.dataset.secretIndex;
+      const pin = secretIndex == null ? button.dataset.pin || '' : ownerPinValues[Number(secretIndex)] || '';
       if (!pin || pin === '—') {
         return;
       }
@@ -8006,11 +8202,7 @@ function applyTokenPillDisplay({ env, valid, expired, hasToken, minutesRemaining
     dot.classList.remove('valid', 'invalid');
   }
 
-  if (capturing) {
-    pill.classList.add('token-pill-capturing');
-    text.textContent = 'Authenticating...';
-    pill.title = `Authenticating session for ${envName} in browser... Complete sign-in on TME tab.`;
-  } else if (valid) {
+  if (valid) {
     pill.classList.add('token-pill-success');
     if (dot) dot.classList.add('valid');
     const timeStr = (minutesRemaining && minutesRemaining > 60)
@@ -8018,6 +8210,10 @@ function applyTokenPillDisplay({ env, valid, expired, hasToken, minutesRemaining
       : `${minutesRemaining || 0}m`;
     text.textContent = `Active (${timeStr})`;
     pill.title = `TME ${envName} Session: Active (${timeStr} remaining). Click to renew session.`;
+  } else if (capturing) {
+    pill.classList.add('token-pill-capturing');
+    text.textContent = 'Authenticating...';
+    pill.title = `Authenticating session for ${envName} in browser... Complete sign-in on TME tab.`;
   } else {
     // Something is wrong with the token -> COMMAND ATTENTION WITH BLINKING GLOW RED
     pill.classList.add('token-pill-alert');
@@ -8037,6 +8233,10 @@ function currentTokenApp() {
   return __fotaHeaderOnly ? 'fota' : 'charger';
 }
 
+function tokenResponseMatchesApp(data, app) {
+  return data?.app === app || (app === 'charger' && !data?.app);
+}
+
 async function checkLiveTokenHealth() {
   if (_tokenHealthChecking) return;
   _tokenHealthChecking = true;
@@ -8046,7 +8246,7 @@ async function checkLiveTokenHealth() {
     const params = new URLSearchParams({ env, app });
     const res = await fetch(dashboardApiUrl(`/api/token-status?${params.toString()}`));
     const data = await res.json();
-    if (env !== state.currentEnv || data?.env !== env || data?.app !== app) return;
+    if (env !== state.currentEnv || data?.env !== env || !tokenResponseMatchesApp(data, app)) return;
     if (data && data.ok) {
       if (data.valid && !state.token) {
         await loadStoredTokenFromLocalBridge();
@@ -8121,14 +8321,15 @@ async function clearSavedToken(environment = state.currentEnv) {
   if (env === state.currentEnv) setToken('');
 }
 
-async function loadStoredTokenFromLocalBridge({ environment = state.currentEnv, differentFrom = '' } = {}) {
+async function loadStoredTokenFromLocalBridge({ environment = state.currentEnv, differentFrom = '', scanBrowser = false } = {}) {
   const env = String(environment || 'prod').toLowerCase();
   const app = currentTokenApp();
   try {
     const params = new URLSearchParams({ env, app });
+    if (scanBrowser) params.set('scanBrowser', '1');
     const response = await fetch(dashboardApiUrl(`/api/session-token?${params.toString()}`), { method: 'GET' });
     const result = await response.json();
-    if (env !== state.currentEnv || result?.env !== env || result?.app !== app) return false;
+    if (env !== state.currentEnv || result?.env !== env || !tokenResponseMatchesApp(result, app)) return false;
     if (result && result.ok && result.token) {
       if (isTokenExpired(result.token) || !isTmeJwtToken(result.token)) {
         setStatus(`Saved TME token for ${env.toUpperCase()} is expired or invalid. Refreshing session automatically...`, 'warning');
@@ -8150,7 +8351,7 @@ async function loadStoredTokenFromLocalBridge({ environment = state.currentEnv, 
 }
 
 async function useSavedToken() {
-  const loaded = await loadStoredTokenFromLocalBridge();
+  const loaded = await loadStoredTokenFromLocalBridge({ scanBrowser: true });
   if (!loaded) {
     setStatus('No saved TME token is available yet. Authenticate in the TME dashboard, then save the session token.', 'warning');
   }
@@ -8861,15 +9062,13 @@ async function autoLoadSavedTokenAndSearch() {
   setStatus('Automatic token refresh is in progress; sign in to TME and reload the page when the session is ready.', 'warning');
 }
 
-let currentAuthWindow = null;
-
 async function retryLoginFromScratch() {
   if (state.tokenRefreshInProgress) return;
   state.tokenRefreshInProgress = true;
   const env = (state.currentEnv || 'prod').toLowerCase();
   const envUpper = env.toUpperCase();
   if (!__fotaHeaderOnly) __dashboardNeedsInitialTokenRefresh = false;
-  if (!state.token) await loadStoredTokenFromLocalBridge({ environment: env });
+  if (!state.token) await loadStoredTokenFromLocalBridge({ environment: env, scanBrowser: true });
   const tokenBeforeRefresh = String(state.token || '').replace(/^Bearer\s+/i, '').trim();
   const refreshBtn = document.getElementById('globalTokenRefresh');
   const refreshIcon = refreshBtn?.querySelector('svg');
@@ -8886,45 +9085,18 @@ async function retryLoginFromScratch() {
   });
 
   const app = currentTokenApp();
-  let openedDirectly = false;
+  setStatus(`Opening a fresh ${envUpper} ${app.toUpperCase()} sign-in tab in your browser...`, 'warning');
   try {
-    if (!currentAuthWindow || currentAuthWindow.closed) {
-      currentAuthWindow = window.open('about:blank', '_blank');
-    } else {
-      currentAuthWindow.location.href = 'about:blank';
-      currentAuthWindow.focus();
-    }
-    if (currentAuthWindow && !currentAuthWindow.closed) {
-      openedDirectly = true;
-    }
-  } catch (e) {
-    console.warn('Direct popup prevented:', e);
-  }
-
-  setStatus(`Initiating fresh login for ${envUpper}... A browser tab has been opened for authentication.`, 'warning');
-  const noBrowserQuery = `&app=${encodeURIComponent(app)}&noBrowser=1${openedDirectly ? '' : '&openBrowser=1'}`;
-  try {
-    const res = await fetch(dashboardApiUrl(`/api/refresh-tme-token?force=true&env=${encodeURIComponent(env)}${noBrowserQuery}`), { method: 'POST' });
+    const params = new URLSearchParams({ force: 'true', env, app });
+    const res = await fetch(dashboardApiUrl(`/api/refresh-tme-token?${params.toString()}`), { method: 'POST' });
     const data = await res.json();
-    if (openedDirectly && currentAuthWindow && !currentAuthWindow.closed && data?.url) {
-      currentAuthWindow.location.href = data.url;
-    }
     if (!data?.ok) {
       setStatus(data?.message || `Could not start ${app.toUpperCase()} authentication for ${envUpper}.`, 'error');
-      if (currentAuthWindow && !currentAuthWindow.closed) currentAuthWindow.close();
-      currentAuthWindow = null;
       if (refreshBtn) refreshBtn.classList.remove('rotating');
       if (refreshIcon) refreshIcon.style.animation = '';
       await checkLiveTokenHealth();
       state.tokenRefreshInProgress = false;
       return;
-    }
-    if (!openedDirectly && data && data.url && !data.browserOpened) {
-      try {
-        currentAuthWindow = window.open(data.url, '_blank');
-      } catch (e) {
-        console.warn('Fallback popup blocked:', e);
-      }
     }
   } catch (err) {
     setStatus(`Failed to initiate fresh login for ${envUpper}: ${err.message}`, 'error');
@@ -8940,14 +9112,6 @@ async function retryLoginFromScratch() {
   if (refreshIcon) refreshIcon.style.animation = '';
 
   if (tokenLoaded) {
-    // Automatically close the opened authentication tab once the new session token is obtained
-    try {
-      if (currentAuthWindow && !currentAuthWindow.closed) {
-        currentAuthWindow.close();
-        currentAuthWindow = null;
-      }
-    } catch (e) {}
-
     setStatus(`Fresh ${envUpper} token captured successfully! Synchronizing live data...`, 'success');
     await checkLiveTokenHealth();
     loadFleetMetadata();
@@ -8965,7 +9129,7 @@ async function retryLoginFromScratch() {
     }
   } else {
     await checkLiveTokenHealth();
-    setStatus(`Fresh login timed out for ${envUpper}. Please sign in in the opened browser tab and click Refresh again.`, 'warning');
+    setStatus(`Fresh login timed out for ${envUpper}. Complete sign-in in the TME tab, then click Refresh again.`, 'warning');
   }
   state.tokenRefreshInProgress = false;
 }
@@ -9033,9 +9197,9 @@ function openChargerDashboard(serialNumber) {
   const fleetView = document.getElementById('fleetView');
   const chargerView = document.getElementById('chargerView');
   const opsView = document.getElementById('opsAnalyticsView');
+  const kubernetesView = document.getElementById('kubernetesPodsView');
   const backBtn = document.getElementById('backToFleetBtn');
   const topbarTitle = document.getElementById('topbarTitle');
-  const activeBadge = document.getElementById('activeChargerBadge');
   const statusCluster = document.getElementById('topbarChargerStatusCluster');
   const serialInput = document.getElementById('serialNumber');
   const topbarOpsBtn = document.getElementById('topbarOpsBtn');
@@ -9043,7 +9207,10 @@ function openChargerDashboard(serialNumber) {
   if (fleetView) fleetView.hidden = true;
   if (chargerView) chargerView.hidden = false;
   if (opsView) opsView.hidden = true;
+  if (kubernetesView) kubernetesView.hidden = true;
   if (topbarOpsBtn) topbarOpsBtn.classList.remove('active');
+  document.getElementById('topbarKubernetesBtn')?.classList.remove('active');
+  stopKubernetesPolling();
   if (backBtn) backBtn.hidden = false;
   if (statusCluster) statusCluster.hidden = false;
   document.querySelector('.topbar')?.setAttribute('data-view', 'charger');
@@ -9052,10 +9219,7 @@ function openChargerDashboard(serialNumber) {
     topbarTitle.textContent = 'Charger Dashboard';
     topbarTitle.hidden = false;
   }
-  if (activeBadge) {
-    activeBadge.hidden = false;
-    activeBadge.innerHTML = `<span class="badge-label">Active Unit:</span><span class="badge-serial">${escapeHtml(serial)}</span>`;
-  }
+  updateActiveChargerBadge(serial);
   if (serialInput) {
     serialInput.value = serial;
     rememberSerial(serial);
@@ -9072,11 +9236,20 @@ function openChargerDashboard(serialNumber) {
   checkSseInteractions(serial);
 }
 
-function openFleetView() {
+function updateActiveChargerBadge(serialNumber) {
+  const activeBadge = document.getElementById('activeChargerBadge');
+  const serial = String(serialNumber || '').trim().toUpperCase();
+  if (!activeBadge || !serial) return;
+  activeBadge.hidden = false;
+  activeBadge.innerHTML = `<span class="badge-label">Active Unit:</span><span class="badge-serial">${escapeHtml(serial)}</span>`;
+}
+
+function openFleetView({ loadFleet = true } = {}) {
   state.currentView = 'fleet';
   const fleetView = document.getElementById('fleetView');
   const chargerView = document.getElementById('chargerView');
   const opsView = document.getElementById('opsAnalyticsView');
+  const kubernetesView = document.getElementById('kubernetesPodsView');
   const backBtn = document.getElementById('backToFleetBtn');
   const topbarTitle = document.getElementById('topbarTitle');
   const activeBadge = document.getElementById('activeChargerBadge');
@@ -9086,7 +9259,10 @@ function openFleetView() {
   if (fleetView) fleetView.hidden = false;
   if (chargerView) chargerView.hidden = true;
   if (opsView) opsView.hidden = true;
+  if (kubernetesView) kubernetesView.hidden = true;
   if (topbarOpsBtn) topbarOpsBtn.classList.remove('active');
+  document.getElementById('topbarKubernetesBtn')?.classList.remove('active');
+  stopKubernetesPolling();
   if (backBtn) backBtn.hidden = true;
   if (statusCluster) statusCluster.hidden = true;
   document.querySelector('.topbar')?.setAttribute('data-view', 'fleet');
@@ -9104,6 +9280,9 @@ function openFleetView() {
   updateEnvironmentUI();
   updateFloatingTimeToolbar();
   fetchOutages();
+  if (loadFleet && (!state.fleet.items.length || state.fleet.error)) {
+    fetchFleetWallboxes(state.fleet.page || 0);
+  }
 }
 
 function openOpsAnalyticsView() {
@@ -9111,6 +9290,7 @@ function openOpsAnalyticsView() {
   const fleetView = document.getElementById('fleetView');
   const chargerView = document.getElementById('chargerView');
   const opsView = document.getElementById('opsAnalyticsView');
+  const kubernetesView = document.getElementById('kubernetesPodsView');
   const backBtn = document.getElementById('backToFleetBtn');
   const topbarTitle = document.getElementById('topbarTitle');
   const activeBadge = document.getElementById('activeChargerBadge');
@@ -9120,7 +9300,11 @@ function openOpsAnalyticsView() {
   if (fleetView) fleetView.hidden = true;
   if (chargerView) chargerView.hidden = true;
   if (opsView) opsView.hidden = false;
+  if (kubernetesView) kubernetesView.hidden = true;
   if (topbarOpsBtn) topbarOpsBtn.classList.add('active');
+  document.getElementById('topbarKubernetesBtn')?.classList.remove('active');
+  stopKubernetesPolling();
+  document.querySelector('.topbar')?.setAttribute('data-view', 'ops');
   if (backBtn) backBtn.hidden = false;
   if (statusCluster) statusCluster.hidden = true;
   if (topbarTitle) {
@@ -9137,6 +9321,979 @@ function openOpsAnalyticsView() {
   updateEnvironmentUI();
   updateFloatingTimeToolbar();
   fetchOpsAnalytics(state.currentEnv);
+}
+
+function stopKubernetesPolling() {
+  window.clearInterval(state.kubernetes.authPollTimer);
+  window.clearInterval(state.kubernetes.refreshTimer);
+  window.clearInterval(state.kubernetes.logTimer);
+  state.kubernetes.authPollTimer = null;
+  state.kubernetes.refreshTimer = null;
+  state.kubernetes.logTimer = null;
+}
+
+function openKubernetesPodsView() {
+  state.currentView = 'kubernetes';
+  document.getElementById('fleetView').hidden = true;
+  document.getElementById('chargerView').hidden = true;
+  document.getElementById('opsAnalyticsView').hidden = true;
+  document.getElementById('kubernetesPodsView').hidden = false;
+  document.getElementById('topbarOpsBtn')?.classList.remove('active');
+  document.getElementById('topbarKubernetesBtn')?.classList.add('active');
+  document.getElementById('backToFleetBtn').hidden = false;
+  document.getElementById('topbarChargerStatusCluster').hidden = true;
+  document.getElementById('activeChargerBadge').hidden = true;
+  const title = document.getElementById('topbarTitle');
+  title.textContent = 'Observability';
+  title.hidden = false;
+  document.querySelector('.topbar')?.setAttribute('data-view', 'kubernetes');
+  document.getElementById('kubernetesNamespaceSelect').value = state.kubernetes.namespace;
+  document.getElementById('kubernetesTimeRange').value = state.kubernetes.timeRange;
+  try {
+    history.replaceState({ view: 'kubernetes' }, '', '#kubernetes');
+  } catch (e) {}
+  stopKubernetesPolling();
+  void checkKubernetesCredentials();
+  state.kubernetes.refreshTimer = window.setInterval(() => {
+    if (state.currentView === 'kubernetes' && state.kubernetes.auth === 'ready') {
+      void fetchKubernetesPods();
+    }
+  }, 30000);
+  window.scrollTo({ top: 0, behavior: 'smooth' });
+  updateEnvironmentUI();
+  updateFloatingTimeToolbar();
+}
+
+function renderKubernetesAuth() {
+  const panel = document.getElementById('kubernetesAuthPanel');
+  const dataView = document.getElementById('kubernetesDataView');
+  const title = document.getElementById('kubernetesAuthTitle');
+  const message = document.getElementById('kubernetesAuthMessage');
+  const loginButton = document.getElementById('kubernetesLoginBtn');
+  const authSpinner = document.getElementById('kubernetesAuthSpinner');
+  const loadingPanel = document.getElementById('kubernetesLoadingPanel');
+  const auth = state.kubernetes.auth;
+  const env = state.kubernetes.env.toUpperCase();
+  const authCopy = {
+    checking: ['Checking AWS access', `Verifying the read-only profile for ${env}.`],
+    'login-required': ['AWS sign-in required', `Sign in with the ${env} read-only AWS profile to inspect this cluster.`],
+    authenticating: ['Complete AWS sign-in', 'Finish the sign-in in the browser window opened by AWS CLI. This view will detect the session automatically.'],
+    'cli-missing': ['AWS CLI unavailable', 'Install and configure AWS CLI v2 with the provided EKS read-only profile, then reopen this view.'],
+    'identity-error': ['Could not verify AWS access', 'The profile returned an unexpected identity response. Retry the check or open the AWS access portal.'],
+    error: ['AWS access check failed', state.kubernetes.error || 'The local backend could not verify AWS access.'],
+    idle: ['Checking AWS access', `Verifying the read-only profile for ${env}.`],
+  };
+  const [heading, copy] = authCopy[auth] || authCopy.error;
+  title.textContent = heading;
+  message.textContent = copy;
+  panel.hidden = auth === 'ready';
+  dataView.hidden = !state.kubernetes.result;
+  authSpinner.hidden = !['checking', 'authenticating'].includes(auth);
+  loadingPanel.hidden = auth !== 'ready' || Boolean(state.kubernetes.result);
+  loginButton.hidden = !['login-required', 'identity-error', 'error'].includes(auth);
+  loginButton.disabled = auth === 'authenticating';
+}
+
+async function readKubernetesApiResponse(response) {
+  if (!response.headers.get('content-type')?.includes('application/json')) {
+    throw new Error('The local operations API is unavailable. Start or restart the Python backend, then retry.');
+  }
+  return response.json();
+}
+
+async function checkKubernetesCredentials() {
+  const env = state.kubernetes.env;
+  const requestId = ++state.kubernetes.authRequestId;
+  if (state.kubernetes.auth !== 'authenticating') state.kubernetes.auth = 'checking';
+  renderKubernetesAuth();
+  try {
+    const response = await fetch(`/api/kubernetes/status?env=${encodeURIComponent(env)}`);
+    const data = await readKubernetesApiResponse(response);
+    if (requestId !== state.kubernetes.authRequestId || env !== state.kubernetes.env) return;
+    if (!response.ok || !data.ok) throw new Error(data.message || 'AWS access status is unavailable.');
+    if (data.authenticated) {
+      const wasReady = state.kubernetes.auth === 'ready';
+      state.kubernetes.auth = 'ready';
+      state.kubernetes.error = '';
+      renderKubernetesAuth();
+      if (!wasReady || !state.kubernetes.result || state.kubernetes.result.namespace !== state.kubernetes.namespace) {
+        void fetchKubernetesPods();
+      }
+      if (state.kubernetes.authPollTimer) {
+        window.clearInterval(state.kubernetes.authPollTimer);
+        state.kubernetes.authPollTimer = null;
+      }
+      return;
+    }
+    if (state.kubernetes.auth !== 'authenticating') state.kubernetes.auth = data.status || 'login-required';
+    renderKubernetesAuth();
+  } catch (error) {
+    if (requestId !== state.kubernetes.authRequestId || env !== state.kubernetes.env) return;
+    state.kubernetes.auth = 'error';
+    state.kubernetes.error = error.message;
+    renderKubernetesAuth();
+  }
+}
+
+async function startKubernetesLogin() {
+  const button = document.getElementById('kubernetesLoginBtn');
+  button.disabled = true;
+  state.kubernetes.auth = 'authenticating';
+  renderKubernetesAuth();
+  try {
+    const response = await fetch(`/api/kubernetes/login?env=${encodeURIComponent(state.kubernetes.env)}`, { method: 'POST' });
+    const data = await readKubernetesApiResponse(response);
+    if (!response.ok || !data.ok) throw new Error(data.message || 'Could not start AWS SSO sign-in.');
+    if (!data.started) throw new Error('AWS CLI did not start the SSO sign-in process. Retry or open the AWS access portal.');
+    state.kubernetes.authPollTimer = window.setInterval(() => {
+      void checkKubernetesCredentials();
+    }, 2500);
+    void checkKubernetesCredentials();
+  } catch (error) {
+    state.kubernetes.auth = 'error';
+    state.kubernetes.error = error.message;
+    renderKubernetesAuth();
+  }
+}
+
+async function fetchKubernetesPods(refreshInfrastructure = false) {
+  if (state.kubernetes.inventoryLoading) return;
+  state.kubernetes.inventoryLoading = true;
+  const env = state.kubernetes.env;
+  const namespace = state.kubernetes.namespace;
+  const requestId = ++state.kubernetes.requestId;
+  const refreshButton = document.getElementById('kubernetesRefreshBtn');
+  const errorMessage = document.getElementById('kubernetesErrorMessage');
+  refreshButton.classList.add('loading');
+  refreshButton.disabled = true;
+  errorMessage.hidden = true;
+  try {
+    const params = new URLSearchParams({ env, namespace });
+    const response = await fetch(`/api/kubernetes/pods?${params.toString()}`);
+    const data = await readKubernetesApiResponse(response);
+    if (requestId !== state.kubernetes.requestId || env !== state.kubernetes.env || namespace !== state.kubernetes.namespace) return;
+    if (response.status === 401) {
+      state.kubernetes.auth = 'login-required';
+      state.kubernetes.result = null;
+      renderKubernetesAuth();
+      return;
+    }
+    if (!response.ok || !data.ok) throw new Error(data.message || 'Pod inventory could not be loaded.');
+    const previousResult = state.kubernetes.result;
+    const hasUsableSnapshot = previousResult?.namespaces?.some((snapshot) => snapshot.availability?.pods && snapshot.availability?.deployments);
+    const primarySourceFailed = data.namespaces?.some((snapshot) => !snapshot.availability?.pods || !snapshot.availability?.deployments);
+    if (previousResult?.namespace === namespace && hasUsableSnapshot && primarySourceFailed) {
+      errorMessage.textContent = 'The latest refresh could not read every workload source. Keeping the last successful snapshot.';
+      errorMessage.hidden = false;
+      return;
+    }
+    if (state.kubernetes.infrastructureNamespace === namespace && state.kubernetes.infrastructure?.nodes?.length) {
+      const infrastructureNodes = new Map(state.kubernetes.infrastructure.nodes.map((node) => [`${node.namespace}/${node.name}`, node]));
+      data.nodes = (data.nodes || []).map((node) => {
+        const enriched = infrastructureNodes.get(`${node.namespace}/${node.name}`);
+        return enriched ? { ...node, ...enriched } : node;
+      });
+    }
+    state.kubernetes.result = data;
+    state.kubernetes.auth = 'ready';
+    state.kubernetes.error = '';
+    renderKubernetesAuth();
+    renderKubernetesPods(data);
+    void fetchKubernetesInfrastructure(refreshInfrastructure);
+  } catch (error) {
+    if (requestId !== state.kubernetes.requestId) return;
+    document.getElementById('kubernetesLoadingPanel').hidden = true;
+    errorMessage.textContent = error.message;
+    errorMessage.hidden = false;
+  } finally {
+    if (requestId === state.kubernetes.requestId) {
+      state.kubernetes.inventoryLoading = false;
+      refreshButton.classList.remove('loading');
+      refreshButton.disabled = false;
+    }
+  }
+}
+
+async function fetchKubernetesInfrastructure(force = false) {
+  const namespace = state.kubernetes.namespace;
+  if (!state.kubernetes.result || state.kubernetes.infrastructureLoading) return;
+  if (!force && state.kubernetes.infrastructureNamespace === namespace && Date.now() - state.kubernetes.infrastructureFetchedAt < 300000) return;
+  const requestId = ++state.kubernetes.infrastructureRequestId;
+  state.kubernetes.infrastructureLoading = true;
+  state.kubernetes.infrastructureError = '';
+  try {
+    const params = new URLSearchParams({ env: state.kubernetes.env, namespace, refresh: force ? 'true' : 'false' });
+    const response = await fetch(`/api/kubernetes/infrastructure?${params.toString()}`);
+    const data = await readKubernetesApiResponse(response);
+    if (requestId !== state.kubernetes.infrastructureRequestId || namespace !== state.kubernetes.namespace) return;
+    if (!response.ok || !data.ok) throw new Error(data.message || 'AWS infrastructure context is unavailable.');
+    const infrastructureNodes = new Map(data.nodes.map((node) => [`${node.namespace}/${node.name}`, node]));
+    state.kubernetes.result.nodes = (state.kubernetes.result.nodes || []).map((node) => {
+      const enriched = infrastructureNodes.get(`${node.namespace}/${node.name}`);
+      return enriched ? { ...node, ...enriched } : node;
+    });
+    state.kubernetes.infrastructure = data;
+    state.kubernetes.infrastructureNamespace = namespace;
+    state.kubernetes.infrastructureFetchedAt = Date.now();
+  } catch (error) {
+    if (requestId !== state.kubernetes.infrastructureRequestId || namespace !== state.kubernetes.namespace) return;
+    state.kubernetes.infrastructure = null;
+    state.kubernetes.infrastructureNamespace = namespace;
+    state.kubernetes.infrastructureFetchedAt = Date.now();
+    state.kubernetes.infrastructureError = error.message;
+  } finally {
+    if (requestId === state.kubernetes.infrastructureRequestId) {
+      state.kubernetes.infrastructureLoading = false;
+      if (state.kubernetes.result && namespace === state.kubernetes.namespace) renderKubernetesPods(state.kubernetes.result);
+    }
+  }
+}
+
+function renderKubernetesPods(data) {
+  const pods = data.pods || [];
+  const deployments = data.deployments || [];
+  const deploymentByName = new Map(deployments.map((deployment) => [`${deployment.namespace}/${deployment.name}`, deployment]));
+  const services = new Map();
+  deployments.forEach((deployment) => {
+    const key = `${deployment.namespace}/${deployment.serviceKey || deployment.name}`;
+    if (!services.has(key)) services.set(key, {
+      key,
+      name: deployment.serviceName || deployment.name,
+      namespace: deployment.namespace,
+      deployments: [],
+      pods: [],
+      nodes: [],
+      events: [],
+      health: 'Unknown',
+      issueAt: '',
+      restartActivity: 0,
+      warningActivity: 0,
+      cpu: null,
+      memory: null,
+      metricsAvailable: data.metricsAvailable?.[deployment.namespace] === true,
+    });
+    services.get(key).deployments.push(deployment);
+  });
+
+  const nodesByKey = new Map((data.nodes || []).map((node) => [`${node.namespace}/${node.name}`, node]));
+  const events = data.events || [];
+  const rangeStart = Date.now() - kubernetesRangeMilliseconds();
+  const inRange = (timestamp) => {
+    const value = Date.parse(timestamp || '');
+    return Number.isFinite(value) && value >= rangeStart && value <= Date.now();
+  };
+  services.forEach((service) => {
+    const workloadNames = new Set(service.deployments.map((deployment) => deployment.name));
+    service.pods = pods.filter((pod) => pod.namespace === service.namespace && workloadNames.has(pod.workload || ''));
+    const nodeNames = new Set(service.pods.map((pod) => pod.node).filter((name) => name && name !== '-'));
+    service.nodes = [...nodeNames].map((name) => nodesByKey.get(`${service.namespace}/${name}`)).filter(Boolean);
+    const podNames = new Set(service.pods.map((pod) => pod.name));
+    service.events = events.filter((event) => event.namespace === service.namespace && (
+      (event.objectKind === 'Pod' && podNames.has(event.objectName))
+      || (event.objectKind === 'Deployment' && workloadNames.has(event.objectName))
+      || (event.objectKind === 'Node' && nodeNames.has(event.objectName))
+    ));
+    const modules = new Map();
+    service.deployments.forEach((deployment) => {
+      const module = deployment.module || 'Workload';
+      if (!modules.has(module)) modules.set(module, { name: module, desired: 0, ready: 0, available: 0, deployments: [], health: 'Healthy' });
+      const group = modules.get(module);
+      group.desired += deployment.desiredReplicas || 0;
+      group.ready += deployment.readyReplicas || 0;
+      group.available += deployment.availableReplicas || 0;
+      group.deployments.push(deployment);
+    });
+    service.modules = [...modules.values()].sort((left, right) => left.name.localeCompare(right.name));
+    service.modules.forEach((module) => {
+      module.health = module.ready === 0 && module.desired > 0 ? 'Critical' : module.ready < module.desired ? 'Warning' : 'Healthy';
+    });
+    service.restartActivity = service.pods.reduce((total, pod) => total + (pod.restarts || 0), 0);
+    service.warningActivity = service.events.filter((event) => event.type === 'Warning' && inRange(event.timestamp)).length;
+    const recentTerminations = service.pods.flatMap((pod) => pod.containers || []).filter((container) => inRange(container.lastFinishedAt));
+    const recentWarnings = service.events.filter((event) => event.type === 'Warning' && inRange(event.timestamp));
+    const criticalEvent = recentWarnings.some((event) => /FailedScheduling|CrashLoopBackOff|ImagePullBackOff|ErrImagePull|FailedMount|NodeNotReady|OOMKilled/i.test(`${event.reason} ${event.message}`));
+    const failedPod = service.pods.some((pod) => pod.health === 'Failed' || (pod.containers || []).some((container) => /CrashLoopBackOff|ImagePullBackOff|ErrImagePull|OOMKilled/i.test(`${container.reason} ${container.lastReason}`)));
+    const unhealthyNode = service.nodes.some((node) => node.ready === false || node.aws?.state && node.aws.state !== 'running' || node.aws?.systemStatus && node.aws.systemStatus !== 'ok' || node.aws?.instanceStatus && node.aws.instanceStatus !== 'ok');
+    const unavailableReplicaSet = service.deployments.some((deployment) => deployment.desiredReplicas > 0 && deployment.readyReplicas === 0);
+    const degraded = service.deployments.some((deployment) => deployment.readyReplicas < deployment.desiredReplicas);
+    if (data.namespaces?.some((snapshot) => snapshot.namespace === service.namespace && (!snapshot.availability?.deployments || !snapshot.availability?.pods))) service.health = 'Unknown';
+    else if (criticalEvent || failedPod || unhealthyNode || unavailableReplicaSet) service.health = 'Critical';
+    else if (degraded || recentWarnings.length || recentTerminations.length) service.health = 'Warning';
+    else service.health = 'Healthy';
+    const issueTimes = [
+      ...recentWarnings.map((event) => event.timestamp),
+      ...recentTerminations.map((container) => container.lastFinishedAt),
+      ...service.pods.flatMap((pod) => (pod.conditions || []).filter((condition) => condition.status !== 'True').map((condition) => condition.lastTransitionTime)),
+    ].filter(inRange).sort();
+    service.issueAt = issueTimes.at(-1) || '';
+    const usage = service.pods.map((pod) => kubernetesPodMetrics(data, pod)).filter(Boolean);
+    if (usage.length) {
+      service.cpu = usage.reduce((total, item) => total + Number.parseFloat(item.cpu), 0);
+      service.memory = usage.reduce((total, item) => total + Number.parseFloat(item.memory), 0);
+    }
+  });
+  state.kubernetes.serviceModels = [...services.values()];
+  const counts = state.kubernetes.serviceModels.reduce((summary, service) => {
+    summary[service.health] = (summary[service.health] || 0) + 1;
+    return summary;
+  }, {});
+  document.getElementById('kubernetesCriticalServiceCount').textContent = counts.Critical || 0;
+  document.getElementById('kubernetesWarningServiceCount').textContent = counts.Warning || 0;
+  document.getElementById('kubernetesHealthyServiceCount').textContent = counts.Healthy || 0;
+  document.getElementById('kubernetesAffectedServiceCount').textContent = (counts.Critical || 0) + (counts.Warning || 0);
+  document.getElementById('kubernetesServiceCatalogMeta').textContent = `${state.kubernetes.serviceModels.length} services · ${counts.Unknown || 0} with no data · ${deployments.length} workloads · ${pods.length} pods`;
+  const sourceIssues = (data.namespaces || []).flatMap((snapshot) => {
+    const issues = [];
+    if (!snapshot.availability?.pods) issues.push(`${snapshot.namespace}: pod inventory unavailable`);
+    if (!snapshot.availability?.deployments) issues.push(`${snapshot.namespace}: service workload inventory unavailable`);
+    if (!snapshot.availability?.nodes) issues.push(`${snapshot.namespace}: Kubernetes node details unavailable`);
+    if (!snapshot.availability?.events) issues.push(`${snapshot.namespace}: events unavailable`);
+    if (!snapshot.availability?.metrics) issues.push(`${snapshot.namespace}: ${snapshot.errors?.metrics || 'current metrics unavailable'}`);
+    return issues;
+  });
+  const availabilityNotice = document.getElementById('kubernetesAvailabilityNotice');
+  const infrastructure = state.kubernetes.infrastructure;
+  if (infrastructure) {
+    infrastructure.namespaces.forEach((snapshot) => {
+      if (!snapshot.availability?.nodes) sourceIssues.push(`${snapshot.namespace}: Kubernetes node details unavailable`);
+      if (snapshot.nodes?.length && !snapshot.availability?.ec2) sourceIssues.push(`${snapshot.namespace}: EC2 enrichment unavailable`);
+      if (snapshot.nodes?.length && !snapshot.availability?.cloudWatchCpu) sourceIssues.push(`${snapshot.namespace}: CloudWatch CPU history unavailable`);
+      if (snapshot.nodes?.length && !snapshot.availability?.alarms) sourceIssues.push(`${snapshot.namespace}: CloudWatch alarms unavailable`);
+    });
+  }
+  if (state.kubernetes.infrastructureError) sourceIssues.push('AWS infrastructure context unavailable; Kubernetes service data remains available.');
+  availabilityNotice.hidden = sourceIssues.length === 0;
+  availabilityNotice.textContent = sourceIssues.length ? sourceIssues.join(' · ') : '';
+  document.getElementById('kubernetesTableMeta').textContent = `${pods.length} pods in selected namespace scope`;
+  renderKubernetesServiceGrid();
+  renderKubernetesServiceDetail();
+  renderKubernetesTimeline(data);
+  renderKubernetesPodTable();
+}
+
+function kubernetesServiceHealthPriority(health) {
+  return { Critical: 0, Warning: 1, Unknown: 2, Healthy: 3 }[health] ?? 4;
+}
+
+function kubernetesServiceSparkline(service) {
+  const start = Date.now() - kubernetesRangeMilliseconds();
+  const series = service.nodes.flatMap((node) => (node.aws?.cpu || []).filter((sample) => Date.parse(sample.timestamp) >= start).map((sample) => ({
+    timestamp: Date.parse(sample.timestamp),
+    value: Number(sample.value),
+  }))).filter((sample) => Number.isFinite(sample.timestamp) && Number.isFinite(sample.value)).sort((left, right) => left.timestamp - right.timestamp);
+  if (series.length < 2) return '<span class="kubernetes-sparkline-empty">No EC2 CPU history</span>';
+  const min = Math.min(...series.map((sample) => sample.value));
+  const max = Math.max(...series.map((sample) => sample.value));
+  const span = max - min || 1;
+  const first = series[0].timestamp;
+  const duration = Math.max(1, series.at(-1).timestamp - first);
+  const points = series.map((sample) => `${((sample.timestamp - first) / duration * 100).toFixed(1)},${(26 - (sample.value - min) / span * 22).toFixed(1)}`).join(' ');
+  return `<svg class="kubernetes-service-sparkline" viewBox="0 0 100 28" role="img" aria-label="Observed EC2 CPU from ${series.length} CloudWatch samples"><polyline points="${points}" /></svg>`;
+}
+
+function renderKubernetesServiceGrid() {
+  const data = state.kubernetes.result;
+  if (!data) return;
+  const search = document.getElementById('kubernetesGlobalSearch').value.trim().toLowerCase();
+  const sort = document.getElementById('kubernetesServiceSort').value;
+  const healthFilter = document.getElementById('kubernetesServiceHealthFilter').value;
+  const priority = (service) => kubernetesServiceHealthPriority(service.health);
+  const services = state.kubernetes.serviceModels.filter((service) => {
+    if (healthFilter && service.health !== healthFilter) return false;
+    if (!search) return true;
+    const haystack = [service.name, service.namespace, ...service.modules.map((module) => module.name),
+      ...service.deployments.map((deployment) => deployment.name),
+      ...service.pods.flatMap((pod) => [pod.name, pod.node, ...(pod.containers || []).map((container) => container.name)])]
+      .join(' ').toLowerCase();
+    return haystack.includes(search);
+  }).sort((left, right) => {
+    if (sort === 'name') return left.name.localeCompare(right.name);
+    if (sort === 'health') return priority(left) - priority(right) || left.name.localeCompare(right.name);
+    if (sort === 'issue') return (Date.parse(right.issueAt) || 0) - (Date.parse(left.issueAt) || 0) || priority(left) - priority(right);
+    if (sort === 'activity') return right.restartActivity + right.warningActivity - left.restartActivity - left.warningActivity || priority(left) - priority(right);
+    if (sort === 'cpu') return (right.cpu ?? -1) - (left.cpu ?? -1) || priority(left) - priority(right);
+    if (sort === 'memory') return (right.memory ?? -1) - (left.memory ?? -1) || priority(left) - priority(right);
+    return priority(left) - priority(right) || (Date.parse(right.issueAt) || 0) - (Date.parse(left.issueAt) || 0) || left.name.localeCompare(right.name);
+  });
+  document.getElementById('kubernetesServiceGrid').innerHTML = services.map((service) => {
+    const moduleRows = service.modules.map((module) => `<div class="kubernetes-service-module-row"><span>${escapeHtml(module.name)}</span><strong class="${module.health.toLowerCase()}">${module.ready}/${module.desired}</strong></div>`).join('');
+    const issue = service.issueAt ? `Last issue ${escapeHtml(formatKubernetesTimestamp(service.issueAt))}` : 'No issue observed in selected window';
+    const cloudWatchSamples = service.nodes.map((node) => node.aws?.cpu?.at(-1)?.value).filter(Number.isFinite);
+    const cloudWatchCpu = cloudWatchSamples.length ? `${(cloudWatchSamples.reduce((total, value) => total + value, 0) / cloudWatchSamples.length).toFixed(1)}% EC2` : '';
+    const cpu = service.metricsAvailable ? service.cpu === null ? 'No sample' : `${Math.round(service.cpu)}m` : cloudWatchCpu || 'Unavailable';
+    const memory = service.metricsAvailable ? service.memory === null ? 'No sample' : `${Math.round(service.memory)}Mi` : 'Unavailable';
+    return `<button type="button" class="kubernetes-service-tile ${service.health.toLowerCase()} ${state.kubernetes.activeServiceKey === service.key ? 'selected' : ''}" data-service-key="${escapeHtml(service.key)}" aria-pressed="${state.kubernetes.activeServiceKey === service.key}" title="Open ${escapeHtml(service.name)} service details">
+      <span class="kubernetes-service-tile-heading"><strong>${escapeHtml(service.name)}</strong><span class="kubernetes-service-health ${service.health.toLowerCase()}"><i></i>${escapeHtml(service.health)}</span></span>
+      <span class="kubernetes-service-namespace">${escapeHtml(service.namespace)}</span>
+      <span class="kubernetes-service-module-list">${moduleRows || '<span class="kubernetes-chart-empty">No module data</span>'}</span>
+      <span class="kubernetes-service-resource-row"><span>CPU <strong>${escapeHtml(cpu)}</strong></span><span>Memory <strong>${escapeHtml(memory)}</strong></span></span>
+      <span class="kubernetes-service-foot-row"><span>${service.pods.length} pods · ${service.nodes.length} nodes</span><span>${service.restartActivity} lifetime restarts</span></span>
+      <span class="kubernetes-service-signal-row">${kubernetesServiceSparkline(service)}<small>${issue}</small></span>
+    </button>`;
+  }).join('');
+  document.getElementById('kubernetesServiceEmptyState').hidden = services.length > 0;
+}
+
+function renderKubernetesServiceDetail() {
+  const detail = document.getElementById('kubernetesServiceDetail');
+  const service = state.kubernetes.serviceModels.find((item) => item.key === state.kubernetes.activeServiceKey);
+  if (!service) {
+    detail.hidden = true;
+    return;
+  }
+  detail.hidden = false;
+  document.getElementById('kubernetesServiceDetailTitle').textContent = service.name;
+  document.getElementById('kubernetesServiceDetailNamespace').textContent = service.namespace;
+  const health = document.getElementById('kubernetesServiceDetailHealth');
+  health.className = `kubernetes-service-health ${service.health.toLowerCase()}`;
+  health.innerHTML = `<i></i>${escapeHtml(service.health)}`;
+  document.getElementById('kubernetesServiceDetailSubtitle').textContent = `${service.deployments.length} workloads · ${service.pods.length} pods · ${service.nodes.length} hosting nodes`;
+  document.getElementById('kubernetesServiceModules').innerHTML = service.modules.map((module) => {
+    const restarts = service.pods.filter((pod) => module.deployments.some((deployment) => deployment.name === pod.workload)).reduce((total, pod) => total + (pod.restarts || 0), 0);
+    return `<div class="kubernetes-service-module ${module.health.toLowerCase()}"><strong>${escapeHtml(module.name)}</strong><span class="kubernetes-service-health ${module.health.toLowerCase()}"><i></i>${escapeHtml(module.health)}</span><span>${module.ready}/${module.desired} ready</span><span>${restarts} lifetime restarts</span></div>`;
+  }).join('');
+  const insights = [];
+  const degradedModules = service.modules.filter((module) => module.ready < module.desired);
+  if (degradedModules.length) insights.push(`${degradedModules.map((module) => module.name).join(', ')}: ${degradedModules.map((module) => `${module.desired - module.ready} of ${module.desired} replicas unavailable`).join('; ')}.`);
+  const recentWarnings = service.events.filter((event) => event.type === 'Warning' && Date.now() - Date.parse(event.timestamp) <= kubernetesRangeMilliseconds());
+  if (recentWarnings.length) insights.push(`${recentWarnings.length} warning event${recentWarnings.length === 1 ? '' : 's'} observed in the selected time window.`);
+  const recentTerminations = service.pods.flatMap((pod) => (pod.containers || []).filter((container) => container.lastFinishedAt && Date.now() - Date.parse(container.lastFinishedAt) <= kubernetesRangeMilliseconds()).map((container) => `${pod.name}/${container.name}`));
+  if (recentTerminations.length) insights.push(`Recent container termination observed: ${recentTerminations.slice(0, 3).join(', ')}.`);
+  const affectedNodes = service.nodes.filter((node) => node.ready === false || node.aws?.state && node.aws.state !== 'running' || node.aws?.systemStatus && node.aws.systemStatus !== 'ok' || node.aws?.instanceStatus && node.aws.instanceStatus !== 'ok');
+  if (affectedNodes.length) insights.push(`${affectedNodes.length} hosting node${affectedNodes.length === 1 ? '' : 's'} report a Kubernetes or EC2 health issue.`);
+  document.getElementById('kubernetesServiceInsights').innerHTML = insights.length
+    ? insights.map((insight) => `<p><i aria-hidden="true"></i>${escapeHtml(insight)}</p>`).join('')
+    : '<p class="quiet">No degraded replicas or recent warning signals were observed in the selected window.</p>';
+  renderKubernetesEventTimeline(state.kubernetes.result);
+  document.getElementById('kubernetesServiceNodes').innerHTML = service.nodes.length ? service.nodes.map((node) => {
+    const aws = node.aws || {};
+    const cpu = aws.cpu?.at(-1);
+    const nodePods = service.pods.filter((pod) => pod.node === node.name).length;
+    const stateLabel = aws.available ? `${aws.state || 'EC2 state unavailable'} · system ${aws.systemStatus || 'N/A'} · instance ${aws.instanceStatus || 'N/A'}` : 'EC2 details unavailable';
+    return `<article class="kubernetes-service-node"><strong title="${escapeHtml(node.name)}">${escapeHtml(node.name)}</strong><span>${nodePods} service pods · ${escapeHtml(node.zone || aws.zone || 'Zone unavailable')}</span><span>${escapeHtml(stateLabel)}</span><span>${cpu ? `EC2 CPU ${Number(cpu.value).toFixed(1)}% · ${escapeHtml(formatKubernetesTimestamp(cpu.timestamp))}` : aws.cpuAvailable ? 'No CloudWatch CPU samples in the selected window' : 'CloudWatch CPU unavailable'}</span>${aws.events?.length ? `<span class="warning">${aws.events.length} scheduled EC2 event${aws.events.length === 1 ? '' : 's'}</span>` : ''}${aws.alarms?.length ? `<span class="warning">${aws.alarms.map((alarm) => `${alarm.name} · ${alarm.state}`).map(escapeHtml).join(' · ')}</span>` : ''}</article>`;
+  }).join('') : '<p class="kubernetes-chart-empty">Node details are unavailable for this namespace.</p>';
+  renderKubernetesServicePods(service);
+  renderKubernetesServiceLogs(service);
+  renderKubernetesTimeline(state.kubernetes.result, 'all', 'kubernetesServiceTimeline', service.pods);
+}
+
+function renderKubernetesServicePods(service) {
+  const globalSearch = document.getElementById('kubernetesGlobalSearch').value.trim().toLowerCase();
+  const modules = service.modules.map((module) => {
+    const workloads = new Set(module.deployments.map((deployment) => deployment.name));
+    const pods = service.pods.filter((pod) => workloads.has(pod.workload));
+    const filtered = globalSearch ? pods.filter((pod) => `${pod.name} ${pod.node} ${(pod.containers || []).map((container) => container.name).join(' ')}`.toLowerCase().includes(globalSearch)) : pods;
+    if (!filtered.length) return '';
+    return `<section class="kubernetes-service-pod-module"><header><strong>${escapeHtml(module.name)}</strong><span>${module.ready}/${module.desired} replicas ready</span></header>${filtered.map((pod) => `<button type="button" class="kubernetes-service-pod" data-pod-key="${escapeHtml(`${pod.namespace}/${pod.name}`)}"><span class="kubernetes-service-health ${pod.health === 'Healthy' ? 'healthy' : pod.health === 'Failed' ? 'critical' : 'warning'}"><i></i>${escapeHtml(pod.health)}</span><strong title="${escapeHtml(pod.name)}">${escapeHtml(pod.name)}</strong><span>${escapeHtml(pod.ready)} containers</span><span>${pod.restarts} lifetime restarts</span><span title="${escapeHtml(pod.node)}">${escapeHtml(pod.node)}</span></button>`).join('')}</section>`;
+  }).join('');
+  document.getElementById('kubernetesServicePods').innerHTML = modules || '<p class="kubernetes-chart-empty">No pods match this service and search.</p>';
+  document.getElementById('kubernetesServicePodsMeta').textContent = `${service.pods.length} replicas · pod names are available here for deeper investigation`;
+}
+
+function renderKubernetesServiceLogs(service) {
+  const podSelect = document.getElementById('kubernetesServiceLogPod');
+  const servicePodKeys = new Set(service.pods.map((pod) => `${pod.namespace}/${pod.name}`));
+  const selectedPod = service.pods.find((pod) => `${pod.namespace}/${pod.name}` === `${state.kubernetes.logPod?.namespace}/${state.kubernetes.logPod?.name}`)
+    || service.pods[0];
+  if (!state.kubernetes.activePod) {
+    state.kubernetes.logTarget = 'service';
+    state.kubernetes.logPod = selectedPod || null;
+  }
+  podSelect.innerHTML = service.pods.map((pod) => `<option value="${escapeHtml(`${pod.namespace}/${pod.name}`)}">${escapeHtml(`${service.deployments.find((deployment) => deployment.name === pod.workload)?.module || 'Workload'} · ${pod.name}`)}</option>`).join('');
+  if (selectedPod) podSelect.value = `${selectedPod.namespace}/${selectedPod.name}`;
+  const containerSelect = document.getElementById('kubernetesServiceLogContainer');
+  const currentPod = service.pods.find((pod) => servicePodKeys.has(`${state.kubernetes.logPod?.namespace}/${state.kubernetes.logPod?.name}`)) || selectedPod;
+  containerSelect.innerHTML = `<option value="">All containers</option>${(currentPod?.containers || []).map((container) => `<option value="${escapeHtml(container.name)}">${escapeHtml(container.name)}${container.kind === 'init' ? ' · init' : ''}</option>`).join('')}`;
+  if (state.kubernetes.logSnapshot && !servicePodKeys.has(`${state.kubernetes.logSnapshot.namespace}/${state.kubernetes.logSnapshot.pod}`)) state.kubernetes.logSnapshot = null;
+  if (state.kubernetes.logTarget === 'service') renderKubernetesLogOutput();
+}
+
+function renderKubernetesEventTimeline(data) {
+  const service = state.kubernetes.serviceModels.find((item) => item.key === state.kubernetes.activeServiceKey);
+  const target = document.getElementById('kubernetesServiceEvents');
+  if (!service || !target) return;
+  const start = Date.now() - kubernetesRangeMilliseconds();
+  const events = service.events.filter((event) => Date.parse(event.timestamp) >= start).map((event) => ({
+    source: 'Kubernetes', severity: event.type === 'Warning' ? 'Warning' : 'Info',
+    timestamp: event.timestamp, title: event.reason || 'Kubernetes event',
+    detail: `${event.objectKind || 'Resource'} ${event.objectName || ''} · ${event.message || 'No event message'}`,
+    count: event.count,
+  }));
+  service.nodes.forEach((node) => (node.aws?.events || []).forEach((event) => events.push({
+    source: 'AWS EC2', severity: 'Warning', timestamp: event.notBefore || event.notAfter || '',
+    title: event.code || 'Scheduled EC2 event', detail: `${node.name} · ${event.description || 'Scheduled infrastructure event'}`,
+  })));
+  const recent = events.filter((event) => Date.parse(event.timestamp) >= start).sort((left, right) => Date.parse(right.timestamp) - Date.parse(left.timestamp));
+  target.innerHTML = recent.length ? recent.slice(0, 12).map((event) => `<li class="kubernetes-service-event ${event.severity.toLowerCase()}"><span class="kubernetes-event-marker" aria-hidden="true"></span><div><strong>${escapeHtml(event.title)}</strong><small>${escapeHtml(event.source)} · ${escapeHtml(event.detail)}</small></div><time>${escapeHtml(formatKubernetesTimestamp(event.timestamp))}${event.count > 1 ? ` · ×${event.count}` : ''}</time></li>`).join('')
+    : '<li class="kubernetes-chart-empty">No related Kubernetes or AWS events were returned for this service in the selected window.</li>';
+}
+
+function formatKubernetesTimestamp(timestamp) {
+  if (!timestamp) return 'Time unavailable';
+  const date = new Date(timestamp);
+  return Number.isNaN(date.getTime()) ? 'Time unavailable' : date.toLocaleString([], { dateStyle: 'medium', timeStyle: 'short' });
+}
+
+function kubernetesRangeMilliseconds() {
+  return { '15m': 900000, '1h': 3600000, '6h': 21600000, '24h': 86400000 }[state.kubernetes.timeRange] || 3600000;
+}
+
+function parseKubernetesCpu(value) {
+  const amount = Number.parseFloat(value);
+  if (!Number.isFinite(amount)) return null;
+  if (value.endsWith('n')) return amount / 1000000;
+  if (value.endsWith('u')) return amount / 1000;
+  if (value.endsWith('m')) return amount;
+  return amount * 1000;
+}
+
+function parseKubernetesMemory(value) {
+  const match = String(value || '').match(/^([\d.]+)(Ki|Mi|Gi|Ti|K|M|G|T|B)?$/i);
+  if (!match) return null;
+  const factor = { ki: 1024, mi: 1048576, gi: 1073741824, ti: 1099511627776, k: 1000, m: 1000000, g: 1000000000, t: 1000000000000, b: 1 }[(match[2] || 'b').toLowerCase()];
+  return Number(match[1]) * factor;
+}
+
+function kubernetesPodMetrics(data, pod) {
+  const metrics = (data.metrics || []).filter((item) => item.namespace === pod.namespace && item.pod === pod.name);
+  if (!metrics.length) return null;
+  const cpu = metrics.reduce((sum, item) => sum + (parseKubernetesCpu(item.cpu) || 0), 0);
+  const memory = metrics.reduce((sum, item) => sum + (parseKubernetesMemory(item.memory) || 0), 0);
+  return { cpu: `${Math.round(cpu)}m`, memory: `${Math.round(memory / 1048576)}Mi` };
+}
+
+function renderKubernetesTimeline(data, selectedPodKey = 'all', targetId = 'kubernetesOperationalTimeline', podScope = null) {
+  const target = document.getElementById(targetId);
+  if (!target) return;
+  const podKey = selectedPodKey || 'all';
+  const allPods = podScope || data.pods || [];
+  const matchingPods = podKey === 'all' ? allPods : allPods.filter((pod) => `${pod.namespace}/${pod.name}` === podKey);
+  const rangeMs = kubernetesRangeMilliseconds();
+  const domainEnd = Date.now();
+  const domainStart = domainEnd - rangeMs;
+  const selection = state.kubernetes.timelineWindow;
+  const start = Math.max(domainStart, selection?.start ?? domainStart);
+  const end = Math.min(domainEnd, selection?.end ?? domainEnd);
+  const visibleRange = Math.max(1, end - start);
+  const sourceFilter = document.getElementById('kubernetesTimelineSourceFilter')?.value || 'all';
+  const severityFilter = document.getElementById('kubernetesTimelineSeverityFilter')?.value || 'all';
+  const position = (timestamp) => Math.max(0, Math.min(100, ((Date.parse(timestamp) - start) / visibleRange) * 100));
+  const withinRange = (timestamp) => {
+    const time = Date.parse(timestamp || '');
+    return Number.isFinite(time) && time >= start && time <= end;
+  };
+  const visible = (source, severity) => (sourceFilter === 'all' || sourceFilter === source)
+    && (severityFilter === 'all' || severityFilter === severity);
+  let markerIndex = 0;
+  const marker = (timestamp, label, tone = 'normal', title = label, source = 'kubernetes', severity = 'info') => {
+    if (!withinRange(timestamp) || !visible(source, severity)) return '';
+    const row = markerIndex++ % 4;
+    return `<span class="kubernetes-timeline-marker ${tone}" style="left:${position(timestamp)}%;--marker-row:${row}" title="${escapeHtml(title)}" aria-label="${escapeHtml(title)}" role="img" tabindex="0"><i aria-hidden="true"></i></span>`;
+  };
+  const lanes = [];
+  const overviewSignals = [];
+  const addOverviewSignal = (timestamp, source, severity = 'info') => {
+    const time = Date.parse(timestamp || '');
+    if (Number.isFinite(time)) overviewSignals.push({ time, source, severity });
+  };
+  const selectedEvents = (data.events || []).filter((event) => {
+    const matchesPod = podKey === 'all' || matchingPods.some((pod) => event.namespace === pod.namespace && event.objectKind === 'Pod' && event.objectName === pod.name);
+    return matchesPod;
+  });
+  selectedEvents.forEach((event) => {
+    const critical = /FailedScheduling|CrashLoopBackOff|ImagePullBackOff|ErrImagePull|FailedMount|NodeNotReady|OOMKilled/i.test(`${event.reason} ${event.message}`);
+    addOverviewSignal(event.timestamp, 'kubernetes', critical ? 'critical' : event.type === 'Warning' ? 'warning' : 'info');
+  });
+  matchingPods.forEach((pod) => {
+    addOverviewSignal(pod.createdAt, 'pods');
+    (pod.conditions || []).filter((condition) => condition.type === 'Ready').forEach((condition) => addOverviewSignal(condition.lastTransitionTime, 'pods', condition.status === 'True' ? 'info' : 'warning'));
+    (pod.containers || []).forEach((container) => {
+      addOverviewSignal(container.startedAt, 'containers');
+      addOverviewSignal(container.lastFinishedAt, 'containers', 'warning');
+    });
+    if (kubernetesPodMetrics(data, pod)) addOverviewSignal(data.fetchedAt, 'metrics');
+  });
+  lanes.push({
+    source: 'kubernetes',
+    label: 'Kubernetes',
+    content: selectedEvents.filter((event) => withinRange(event.timestamp)).slice(0, 24).map((event) => {
+      const critical = /FailedScheduling|CrashLoopBackOff|ImagePullBackOff|ErrImagePull|FailedMount|NodeNotReady|OOMKilled/i.test(`${event.reason} ${event.message}`);
+      const severity = critical ? 'critical' : event.type === 'Warning' ? 'warning' : 'info';
+      return marker(event.timestamp, event.reason || 'Event', critical ? 'critical' : event.type === 'Warning' ? 'warning' : 'normal', `${event.type} · ${event.reason} · ${event.message}`, 'kubernetes', severity);
+    }).join(''),
+  });
+
+  const lifecycle = [];
+  matchingPods.slice(0, podKey === 'all' && !podScope ? 24 : matchingPods.length).forEach((pod) => {
+    lifecycle.push(marker(pod.createdAt, `Created · ${pod.name}`, 'lifecycle', `${pod.namespace}/${pod.name} created`, 'pods'));
+    (pod.conditions || []).filter((condition) => condition.type === 'Ready').forEach((condition) => {
+      const severity = condition.status === 'True' ? 'info' : 'warning';
+      lifecycle.push(marker(condition.lastTransitionTime, condition.status === 'True' ? `Ready · ${pod.name}` : `Not ready · ${pod.name}`, condition.status === 'True' ? 'normal' : 'warning', `${pod.name} readiness changed: ${condition.status}${condition.reason ? ` · ${condition.reason}` : ''}`, 'pods', severity));
+    });
+    (pod.containers || []).forEach((container) => {
+      if (container.lastFinishedAt) lifecycle.push(marker(container.lastFinishedAt, `Restart · ${pod.name}`, 'warning', `${container.name}: last termination${container.lastReason ? ` · ${container.lastReason}` : ''}; ${container.restarts} lifetime restarts`, 'containers', 'warning'));
+    });
+  });
+  lanes.push({ source: 'pods', label: 'Pods', content: lifecycle.join('') });
+
+  const containerBars = [];
+  matchingPods.slice(0, podKey === 'all' && !podScope ? 24 : matchingPods.length).forEach((pod) => {
+    (pod.containers || []).forEach((container) => {
+      const startAt = container.startedAt && withinRange(container.startedAt) ? position(container.startedAt) : 0;
+      if (container.state === 'running' && visible('containers', 'info')) {
+        containerBars.push(`<span class="kubernetes-timeline-bar running" style="left:${startAt}%;width:${Math.max(0.5, 100 - startAt)}%" title="${escapeHtml(`${pod.name} · ${container.name} running${container.startedAt ? ` since ${formatKubernetesTimestamp(container.startedAt)}` : ''}`)}"><b>${escapeHtml(podKey === 'all' ? container.name : container.name)}</b></span>`);
+      } else if (container.lastFinishedAt) {
+        containerBars.push(marker(container.lastFinishedAt, `${pod.name} · ${container.lastReason || 'Terminated'}`, 'warning', `${container.name} last terminated at ${formatKubernetesTimestamp(container.lastFinishedAt)}`, 'containers', 'warning'));
+      }
+    });
+  });
+  lanes.push({ source: 'containers', label: 'Containers', content: containerBars.join('') });
+
+  const resourceMarkers = [];
+  matchingPods.forEach((pod) => {
+    const usage = kubernetesPodMetrics(data, pod);
+    if (usage) resourceMarkers.push(marker(data.fetchedAt, `${pod.name} · ${usage.cpu} / ${usage.memory}`, 'resource', `Current Metrics API sample for ${pod.namespace}/${pod.name}: CPU ${usage.cpu}, memory ${usage.memory}`, 'metrics'));
+  });
+  lanes.push({ source: 'metrics', label: 'Metrics', content: resourceMarkers.slice(0, 16).join('') });
+
+  const logs = state.kubernetes.logSnapshot;
+  const logMarkers = [];
+  if (logs && matchingPods.some((pod) => pod.namespace === logs.namespace && pod.name === logs.pod)) {
+    (logs.logs || '').split(/\r?\n/).filter((line) => /\b(error|fatal|exception|panic|warning|warn)\b/i.test(line)).slice(-12).forEach((line) => {
+      const timestamp = line.match(/\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d(?:\.\d+)?Z/)?.[0];
+      const critical = /\b(fatal|panic)\b/i.test(line);
+      const warning = /\b(error|fatal|exception|panic)\b/i.test(line);
+      if (timestamp) addOverviewSignal(timestamp, 'logs', critical ? 'critical' : warning ? 'warning' : 'info');
+      if (timestamp) logMarkers.push(marker(timestamp, warning ? 'Log error' : 'Log warning', critical ? 'critical' : warning ? 'warning' : 'normal', `${logs.pod}/${logs.container} log signal at ${formatKubernetesTimestamp(timestamp)}`, 'logs', critical ? 'critical' : warning ? 'warning' : 'info'));
+    });
+  }
+  lanes.push({ source: 'logs', label: 'Logs', content: logMarkers.join('') });
+
+  const serviceNodeNames = podScope ? new Set(podScope.map((pod) => `${pod.namespace}/${pod.node}`)) : null;
+  const nodes = (data.nodes || []).filter((node) => !serviceNodeNames || serviceNodeNames.has(`${node.namespace}/${node.name}`));
+  const awsMarkers = [];
+  const awsSamples = [];
+  nodes.forEach((node) => {
+    const aws = node.aws || {};
+    (aws.events || []).forEach((event) => {
+      const timestamp = event.notBefore || event.notAfter;
+      addOverviewSignal(timestamp, 'aws', 'warning');
+      awsMarkers.push(marker(timestamp, event.code || 'EC2 event', 'warning', `${node.name} · ${event.description || 'Scheduled EC2 event'}`, 'aws', 'warning'));
+    });
+    if (aws.available && (aws.state && aws.state !== 'running' || aws.systemStatus && aws.systemStatus !== 'ok' || aws.instanceStatus && aws.instanceStatus !== 'ok')) {
+      awsMarkers.push(marker(data.fetchedAt, `EC2 issue · ${node.name}`, 'critical', `${node.name}: EC2 ${aws.state || 'state unavailable'}, system ${aws.systemStatus || 'N/A'}, instance ${aws.instanceStatus || 'N/A'}; observed at snapshot time`, 'aws', 'critical'));
+    }
+    (aws.cpu || []).forEach((sample) => {
+      addOverviewSignal(sample.timestamp, 'aws');
+      if (withinRange(sample.timestamp)) awsSamples.push({ timestamp: Date.parse(sample.timestamp), value: Number(sample.value) });
+    });
+  });
+  let awsSparkline = '';
+  if (awsSamples.length > 1 && visible('aws', 'info')) {
+    const points = awsSamples.filter((sample) => Number.isFinite(sample.timestamp) && Number.isFinite(sample.value)).sort((left, right) => left.timestamp - right.timestamp)
+      .map((sample) => `${Math.max(0, Math.min(100, ((sample.timestamp - start) / visibleRange) * 100)).toFixed(2)},${(27 - Math.max(0, Math.min(100, sample.value)) / 100 * 24).toFixed(2)}`).join(' ');
+    if (points) awsSparkline = `<svg class="kubernetes-timeline-sparkline" viewBox="0 0 100 28" preserveAspectRatio="none" role="img" aria-label="Observed CloudWatch EC2 CPU samples"><polyline points="${points}" /></svg>`;
+  }
+  lanes.push({ source: 'aws', label: 'AWS / EC2', content: `${awsSparkline}${awsMarkers.join('')}` });
+
+  const formatAxisTime = (timestamp) => new Date(timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+  const ticks = [0, 0.25, 0.5, 0.75, 1].map((part) => `<time>${formatAxisTime(start + visibleRange * part)}</time>`).join('');
+  target.innerHTML = `<div class="kubernetes-timeline-axis"><span></span><div>${ticks}</div></div>${lanes.filter((lane) => sourceFilter === 'all' || sourceFilter === lane.source).map((lane) => `<div class="kubernetes-timeline-lane"><strong>${escapeHtml(lane.label)}</strong><div class="kubernetes-timeline-track">${lane.content || '<span class="kubernetes-timeline-empty">No signal in selected range</span>'}</div></div>`).join('')}`;
+  const visibleSignals = overviewSignals.filter((signal) => visible(signal.source, signal.severity));
+  const selectedSignalCount = visibleSignals.filter((signal) => signal.time >= start && signal.time <= end).length;
+  const overviewMarkup = `<section class="kubernetes-timeline-overview" aria-label="Timeline range overview"><div class="kubernetes-overview-heading"><strong>Overview</strong><span>${selectedSignalCount} signals in range</span><button type="button" data-kubernetes-timeline-reset title="Show the full selected time window">Reset</button></div><div class="overview-scale"><span>${escapeHtml(formatExact(domainStart))}</span><strong>${escapeHtml(formatDuration(start, end))} selected</strong><span>${escapeHtml(formatExact(domainEnd))}</span></div><div class="overview-track" aria-label="Drag to select a time range"><canvas aria-hidden="true"></canvas><div class="overview-window" style="left:${((start - domainStart) / rangeMs) * 100}%;width:${Math.max(0.5, ((end - start) / rangeMs) * 100)}%"><span class="overview-window-start" hidden></span></div><div class="overview-cursor" hidden></div><div class="overview-brush" hidden><span class="overview-window-start"></span></div><div class="overview-tip" hidden></div></div></section>`;
+  target.insertAdjacentHTML('afterbegin', overviewMarkup);
+  const overview = target.querySelector('.kubernetes-timeline-overview');
+  const overviewTrack = overview?.querySelector('.overview-track');
+  const canvas = overviewTrack?.querySelector('canvas');
+  if (overviewTrack && canvas) {
+    const width = overviewTrack.clientWidth || 680;
+    const height = 38;
+    const ratio = window.devicePixelRatio || 1;
+    canvas.width = Math.floor(width * ratio);
+    canvas.height = Math.floor(height * ratio);
+    const context = canvas.getContext('2d');
+    context.setTransform(ratio, 0, 0, ratio, 0, 0);
+    context.clearRect(0, 0, width, height);
+    const bucketCount = Math.max(48, Math.floor(width / 4));
+    const buckets = Array.from({ length: bucketCount }, () => ({}));
+    const colors = { kubernetes: '#347ea5', pods: '#ca7a14', containers: '#18804a', logs: '#c8323e', metrics: '#16794a', aws: '#64748b' };
+    visibleSignals.forEach((signal) => {
+      const index = Math.min(bucketCount - 1, Math.max(0, Math.floor(((signal.time - domainStart) / rangeMs) * bucketCount)));
+      buckets[index][signal.source] = (buckets[index][signal.source] || 0) + 1;
+    });
+    const max = Math.max(1, ...buckets.map((bucket) => Object.values(bucket).reduce((sum, count) => sum + count, 0)));
+    buckets.forEach((bucket, index) => {
+      let y = height;
+      Object.entries(bucket).forEach(([source, count]) => {
+        const barHeight = (count / max) * (height - 3);
+        context.fillStyle = colors[source] || colors.kubernetes;
+        context.fillRect(index * width / bucketCount, y - barHeight, Math.max(1, width / bucketCount - 0.5), barHeight);
+        y -= barHeight;
+      });
+    });
+    bindOverview(overview, {
+      widget: 'events',
+      getBounds: () => ({ start: domainStart, end: domainEnd }),
+      onApply: (rangeStart, rangeEnd) => {
+        state.kubernetes.timelineWindow = { start: rangeStart, end: rangeEnd };
+        renderKubernetesTimeline(data, podKey, targetId, podScope);
+      },
+    });
+  }
+  overview?.querySelector('[data-kubernetes-timeline-reset]')?.addEventListener('click', () => {
+    state.kubernetes.timelineWindow = null;
+    renderKubernetesTimeline(data, podKey, targetId, podScope);
+  });
+  if (targetId === 'kubernetesOperationalTimeline') {
+    const metricAvailability = Object.values(data.metricsAvailable || {});
+    const metricNote = metricAvailability.length && metricAvailability.every(Boolean)
+      ? 'Pod CPU and memory are current Metrics API samples. EC2 CPU history is sampled from CloudWatch; no application request or latency history is connected.'
+      : 'Pod Metrics API is unavailable in one or more namespaces. EC2 history is shown only for returned CloudWatch datapoints; no application request or latency history is connected.';
+    document.getElementById('kubernetesTimelineNote').textContent = `${metricNote} Kubernetes event retention and pod timestamps define the remaining history.`;
+  }
+}
+
+function openKubernetesPodDetail(pod) {
+  const data = state.kubernetes.result;
+  const dialog = document.getElementById('kubernetesPodDetailDialog');
+  cancelKubernetesLogRequest();
+  window.clearInterval(state.kubernetes.logTimer);
+  state.kubernetes.logTimer = null;
+  state.kubernetes.activePod = { namespace: pod.namespace, name: pod.name };
+  state.kubernetes.logTarget = 'pod';
+  state.kubernetes.logPod = state.kubernetes.activePod;
+  state.kubernetes.logSnapshot = null;
+  state.kubernetes.logError = '';
+  const healthClass = { Healthy: 'healthy', 'Not ready': 'not-ready', Pending: 'pending', Failed: 'failed', Completed: 'completed', Unknown: 'unknown' }[pod.health] || 'unknown';
+  document.getElementById('kubernetesPodDetailTitle').textContent = pod.name;
+  document.getElementById('kubernetesPodDetailSubtitle').textContent = `${pod.namespace} · ${pod.node || 'Unassigned'} · ${pod.scheduler || 'default-scheduler'}`;
+  renderKubernetesTimeline(data, `${pod.namespace}/${pod.name}`);
+  renderKubernetesTimeline(data, `${pod.namespace}/${pod.name}`, 'kubernetesPodDetailTimeline');
+
+  const usage = kubernetesPodMetrics(data, pod);
+  const details = [
+    ['Health', `<span class="kubernetes-health-chip ${healthClass}"><i></i>${escapeHtml(pod.health)}</span>`],
+    ['Phase', escapeHtml(pod.phase || 'Unknown')], ['Ready containers', escapeHtml(pod.ready || '0/0')],
+    ['Restarts', escapeHtml(pod.restarts ?? 0)], ['Node', escapeHtml(pod.node || 'Unassigned')],
+    ['Pod IP', escapeHtml(pod.podIP || '—')], ['Age', escapeHtml(pod.age || '—')],
+    ['CPU · current sample', escapeHtml(usage?.cpu || 'Unavailable')], ['Memory · current sample', escapeHtml(usage?.memory || 'Unavailable')],
+  ];
+  document.getElementById('kubernetesPodDetailMetrics').innerHTML = details.map(([label, value]) => `<div><dt>${label}</dt><dd>${value}</dd></div>`).join('');
+
+  const containers = pod.containers || [];
+  document.getElementById('kubernetesPodDetailContainers').innerHTML = containers.length ? containers.map((container) => {
+    const failureState = /BackOff|ErrImagePull|CreateContainer|RunContainer/i.test(`${container.reason} ${container.lastReason}`);
+    const stateClass = container.ready ? 'healthy' : container.state === 'terminated' || failureState ? 'failed' : 'pending';
+    const stateLabel = container.ready ? 'Ready' : container.reason || container.state || 'Unknown';
+    const sample = (data.metrics || []).find((metric) => metric.namespace === pod.namespace && metric.pod === pod.name && metric.container === container.name);
+    const requests = Object.entries(container.requests || {}).map(([key, value]) => `${key} ${value}`).join(' · ') || 'None';
+    const limits = Object.entries(container.limits || {}).map(([key, value]) => `${key} ${value}`).join(' · ') || 'None';
+    const memoryLimit = container.limits?.memory ? parseKubernetesMemory(container.limits.memory) : null;
+    const memoryUsage = sample ? parseKubernetesMemory(sample.memory) : null;
+    const memoryRatio = memoryLimit && memoryUsage ? memoryUsage / memoryLimit : 0;
+    const memoryInsight = memoryRatio >= 0.8 ? `<strong class="kubernetes-resource-warning">Memory at ${Math.round(memoryRatio * 100)}% of configured limit</strong>` : '';
+    const probeText = ['readiness', 'liveness', 'startup'].map((name) => container.probes?.[name] ? `${name} probe · every ${container.probes[name].periodSeconds}s` : '').filter(Boolean).join(' · ') || 'No probes configured';
+    return `<article class="kubernetes-container-card"><div class="kubernetes-container-heading"><strong>${escapeHtml(container.name)}</strong><span class="kubernetes-node-state ${stateClass}"><i></i>${escapeHtml(stateLabel)}</span></div>
+      <p class="kubernetes-container-image" title="${escapeHtml(container.image)}">${escapeHtml(container.image || 'Image unavailable')}</p>
+      <span>${escapeHtml(container.kind)} · ${escapeHtml(container.restarts ?? 0)} lifetime restarts${container.lastExitCode !== null && container.lastExitCode !== undefined ? ` · last exit ${escapeHtml(container.lastExitCode)}` : ''}</span>
+      <p>Usage ${escapeHtml(sample ? `${sample.cpu} CPU · ${sample.memory} memory` : 'Metrics unavailable')} · Requests ${escapeHtml(requests)} · Limits ${escapeHtml(limits)}</p>
+      <p>${escapeHtml(probeText)}</p>${memoryInsight}
+      ${container.lastReason ? `<p>Previous termination: ${escapeHtml(container.lastReason)}${container.lastFinishedAt ? ` · ${escapeHtml(formatKubernetesTimestamp(container.lastFinishedAt))}` : ''}</p>` : ''}
+      ${container.message || container.lastMessage ? `<p>${escapeHtml(container.message || container.lastMessage)}</p>` : ''}</article>`;
+  }).join('') : '<p class="kubernetes-chart-empty">No container details were reported.</p>';
+
+  const conditions = pod.conditions || [];
+  document.getElementById('kubernetesPodDetailConditions').innerHTML = conditions.length ? conditions.map((condition) => `
+    <div class="kubernetes-detail-line"><strong>${escapeHtml(condition.type || 'Condition')}</strong><span>${escapeHtml(condition.status || 'Unknown')}${condition.reason ? ` · ${escapeHtml(condition.reason)}` : ''}</span>${condition.message ? `<p>${escapeHtml(condition.message)}</p>` : ''}</div>
+  `).join('') : '<p class="kubernetes-chart-empty">No pod conditions were reported.</p>';
+
+  const relatedEvents = (data.events || []).filter((event) => event.objectName === pod.name && event.namespace === pod.namespace && (!event.objectKind || event.objectKind === 'Pod'));
+  let eventContent;
+  if (!(data.eventsAvailable ?? Array.isArray(data.events))) eventContent = '<p class="kubernetes-chart-empty">Event access is unavailable in one or more selected namespaces.</p>';
+  else if (!relatedEvents.length) eventContent = '<p class="kubernetes-chart-empty">No recent events are associated with this pod.</p>';
+  else eventContent = relatedEvents.slice(0, 6).map((event) => `<div class="kubernetes-detail-line"><strong>${escapeHtml(event.reason)} · ${escapeHtml(event.type)}</strong><span>${escapeHtml(formatKubernetesTimestamp(event.timestamp))}${event.reportingComponent ? ` · ${escapeHtml(event.reportingComponent)}` : ''}${event.count > 1 ? ` · ×${event.count}` : ''}</span><p>${escapeHtml(event.message)}</p></div>`).join('');
+  document.getElementById('kubernetesPodDetailEvents').innerHTML = eventContent;
+
+  const ownerText = (pod.owners || []).map((owner) => `${owner.kind} / ${owner.name}`).filter(Boolean).join(', ') || 'No owner reference';
+  const labels = (pod.labels || []).map((label) => `<span class="kubernetes-label-chip"><strong>${escapeHtml(label.key)}</strong>${escapeHtml(label.value)}</span>`).join('');
+  document.getElementById('kubernetesPodDetailMetadata').innerHTML = `<div class="kubernetes-detail-line"><strong>Owner</strong><span>${escapeHtml(ownerText)}</span></div><div class="kubernetes-label-list">${labels || '<span class="kubernetes-chart-empty">No labels reported.</span>'}</div>`;
+  const containerSelect = document.getElementById('kubernetesLogContainer');
+  containerSelect.innerHTML = `<option value="">All containers</option>${containers.map((container) => `<option value="${escapeHtml(container.name)}">${escapeHtml(container.name)}${container.kind === 'init' ? ' · init' : ''}</option>`).join('')}`;
+  document.getElementById('kubernetesLogInstance').value = 'current';
+  document.getElementById('kubernetesLogsLiveToggle').setAttribute('aria-pressed', 'false');
+  document.getElementById('kubernetesLogsLiveToggle').textContent = 'Start live';
+  document.getElementById('kubernetesPodLogs').textContent = 'Loading recent container logs...';
+  if (!dialog.open) dialog.showModal();
+  void fetchKubernetesLogs();
+}
+
+function renderKubernetesLogOutput() {
+  const snapshot = state.kubernetes.logSnapshot;
+  if (!snapshot) return;
+  const isService = state.kubernetes.logTarget === 'service';
+  const prefix = isService ? 'kubernetesServiceLog' : 'kubernetesLog';
+  const filter = document.getElementById(`${prefix}Filter`).value;
+  const lines = (snapshot.logs || '').split(/\r?\n/);
+  const filtered = lines.filter((line) => {
+    if (filter === 'error') return /\b(error|fatal|exception|panic)\b/i.test(line);
+    if (filter === 'warning') return /\b(warning|warn)\b/i.test(line);
+    return true;
+  });
+  document.getElementById(isService ? 'kubernetesServiceLogs' : 'kubernetesPodLogs').textContent = filtered.join('\n') || (lines.length ? 'No log lines match this filter.' : 'No log lines were returned for this container and time window.');
+  const live = Boolean(state.kubernetes.logTimer);
+  const refreshState = state.kubernetes.logLoading ? ' · refreshing' : state.kubernetes.logError ? ` · refresh failed: ${state.kubernetes.logError}` : '';
+  document.getElementById(isService ? 'kubernetesServiceLogsMeta' : 'kubernetesLogsMeta').textContent = `${snapshot.namespace}/${snapshot.pod} · ${snapshot.container}${snapshot.previous ? ' · previous instance' : ''} · ${filtered.length} returned lines · sampled ${formatKubernetesTimestamp(snapshot.fetchedAt)}${snapshot.truncated ? ' · output capped at 64 KiB' : ''}${live ? ' · refreshed every 15 seconds' : ''}${refreshState}`;
+}
+
+function cancelKubernetesLogRequest() {
+  state.kubernetes.logRequestId += 1;
+  state.kubernetes.logAbortController?.abort();
+  state.kubernetes.logAbortController = null;
+  state.kubernetes.logLoading = false;
+}
+
+function selectKubernetesServiceLogPod() {
+  const selectedKey = document.getElementById('kubernetesServiceLogPod').value;
+  const pod = state.kubernetes.result?.pods?.find((item) => `${item.namespace}/${item.name}` === selectedKey);
+  if (!pod) return;
+  cancelKubernetesLogRequest();
+  state.kubernetes.logTarget = 'service';
+  state.kubernetes.logPod = pod;
+  state.kubernetes.logSnapshot = null;
+  state.kubernetes.logError = '';
+  window.clearInterval(state.kubernetes.logTimer);
+  state.kubernetes.logTimer = null;
+  const toggle = document.getElementById('kubernetesServiceLogsLiveToggle');
+  toggle.setAttribute('aria-pressed', 'false');
+  toggle.textContent = 'Start live';
+  document.getElementById('kubernetesServiceLogs').textContent = 'Select a container and load recent logs.';
+  document.getElementById('kubernetesServiceLogsMeta').textContent = 'Logs load only when requested.';
+  const service = state.kubernetes.serviceModels.find((item) => item.key === state.kubernetes.activeServiceKey);
+  if (service) renderKubernetesServiceLogs(service);
+}
+
+function toggleKubernetesLogPolling(button, isService) {
+  if (state.kubernetes.logTimer) {
+    window.clearInterval(state.kubernetes.logTimer);
+    state.kubernetes.logTimer = null;
+    button.setAttribute('aria-pressed', 'false');
+    button.textContent = 'Start live';
+    renderKubernetesLogOutput();
+    return;
+  }
+  state.kubernetes.logTarget = isService ? 'service' : 'pod';
+  button.setAttribute('aria-pressed', 'true');
+  button.textContent = 'Stop live';
+  state.kubernetes.logTimer = window.setInterval(() => void fetchKubernetesLogs(), 15000);
+  void fetchKubernetesLogs();
+}
+
+async function fetchKubernetesLogs() {
+  const isService = state.kubernetes.logTarget === 'service';
+  const pod = isService ? state.kubernetes.logPod : state.kubernetes.activePod;
+  if (!pod || state.kubernetes.logLoading) return;
+  state.kubernetes.logLoading = true;
+  state.kubernetes.logError = '';
+  const prefix = isService ? 'kubernetesServiceLog' : 'kubernetesLog';
+  const podKey = `${pod.namespace}/${pod.name}`;
+  const requestId = ++state.kubernetes.logRequestId;
+  const controller = new AbortController();
+  state.kubernetes.logAbortController = controller;
+  const timeoutId = window.setTimeout(() => controller.abort(), 65000);
+  const params = new URLSearchParams({
+    env: state.kubernetes.env,
+    namespace: pod.namespace,
+    pod: pod.name,
+    container: document.getElementById(`${prefix}Container`).value,
+    previous: String(document.getElementById(`${prefix}Instance`).value === 'previous'),
+    since: document.getElementById(`${prefix}Window`).value,
+  });
+  const output = document.getElementById(isService ? 'kubernetesServiceLogs' : 'kubernetesPodLogs');
+  const meta = document.getElementById(isService ? 'kubernetesServiceLogsMeta' : 'kubernetesLogsMeta');
+  if (state.kubernetes.logSnapshot) renderKubernetesLogOutput();
+  else output.textContent = 'Loading recent container logs...';
+  try {
+    const response = await fetch(`/api/kubernetes/logs?${params.toString()}`, { signal: controller.signal });
+    const data = await readKubernetesApiResponse(response);
+    const currentPod = isService ? state.kubernetes.logPod : state.kubernetes.activePod;
+    if (requestId !== state.kubernetes.logRequestId || !currentPod || podKey !== `${currentPod.namespace}/${currentPod.name}`) return;
+    if (!response.ok || !data.ok) throw new Error(data.message || 'Container logs are unavailable.');
+    state.kubernetes.logSnapshot = data;
+    renderKubernetesLogOutput();
+    if (state.kubernetes.result) {
+      renderKubernetesTimeline(state.kubernetes.result);
+      const service = state.kubernetes.serviceModels.find((item) => item.key === state.kubernetes.activeServiceKey);
+      if (service) renderKubernetesTimeline(state.kubernetes.result, 'all', 'kubernetesServiceTimeline', service.pods);
+    }
+  } catch (error) {
+    if (requestId !== state.kubernetes.logRequestId) return;
+    state.kubernetes.logError = error.name === 'AbortError' ? 'The log request timed out or was cancelled.' : error.message;
+    if (state.kubernetes.logSnapshot) renderKubernetesLogOutput();
+    else {
+      output.textContent = `Logs unavailable: ${state.kubernetes.logError}`;
+      meta.textContent = 'Log access is optional; service health and other available signals remain visible.';
+    }
+  } finally {
+    window.clearTimeout(timeoutId);
+    if (requestId === state.kubernetes.logRequestId) {
+      state.kubernetes.logLoading = false;
+      state.kubernetes.logAbortController = null;
+      if (state.kubernetes.logSnapshot) renderKubernetesLogOutput();
+    }
+  }
+}
+
+function renderKubernetesPodTable() {
+  const data = state.kubernetes.result;
+  if (!data) return;
+  const search = document.getElementById('kubernetesSearchInput').value.trim().toLowerCase();
+  const globalSearch = document.getElementById('kubernetesGlobalSearch').value.trim().toLowerCase();
+  const health = document.getElementById('kubernetesHealthFilter').value;
+  const sort = document.getElementById('kubernetesPodSort').value;
+  const priority = { Failed: 0, 'Not ready': 1, Pending: 2, Unknown: 3, Healthy: 4, Completed: 5 };
+  const pods = (data.pods || []).filter((pod) => {
+    const containerNames = (pod.containers || []).map((container) => container.name).join(' ');
+    const deployment = state.kubernetes.serviceModels.flatMap((service) => service.deployments).find((item) => item.namespace === pod.namespace && item.name === pod.workload);
+    const service = state.kubernetes.serviceModels.find((item) => item.namespace === pod.namespace && item.deployments.includes(deployment));
+    const searchable = `${pod.namespace} ${pod.name} ${pod.node} ${containerNames} ${service?.name || ''} ${deployment?.module || ''}`.toLowerCase();
+    const matchesSearch = (!search || searchable.includes(search)) && (!globalSearch || searchable.includes(globalSearch));
+    return matchesSearch && (!health || pod.health === health);
+  }).sort((left, right) => {
+    if (sort === 'name') return left.name.localeCompare(right.name);
+    if (sort === 'node') return left.node.localeCompare(right.node) || left.name.localeCompare(right.name);
+    if (sort === 'restarts') return right.restarts - left.restarts || left.name.localeCompare(right.name);
+    const leftUsage = kubernetesPodMetrics(data, left);
+    const rightUsage = kubernetesPodMetrics(data, right);
+    if (sort === 'cpu') return (Number.parseFloat(rightUsage?.cpu) || -1) - (Number.parseFloat(leftUsage?.cpu) || -1) || left.name.localeCompare(right.name);
+    if (sort === 'memory') return (Number.parseFloat(rightUsage?.memory) || -1) - (Number.parseFloat(leftUsage?.memory) || -1) || left.name.localeCompare(right.name);
+    if (sort === 'service') return (left.workload || '').localeCompare(right.workload || '') || left.name.localeCompare(right.name);
+    return (priority[left.health] ?? 3) - (priority[right.health] ?? 3) || right.restarts - left.restarts || left.namespace.localeCompare(right.namespace);
+  });
+  const podIndexes = new Map((data.pods || []).map((pod, index) => [pod, index]));
+  const body = document.getElementById('kubernetesPodsTableBody');
+  body.innerHTML = pods.map((pod) => {
+    const healthClass = { Healthy: 'healthy', 'Not ready': 'not-ready', Pending: 'pending', Failed: 'failed', Completed: 'completed', Unknown: 'unknown' }[pod.health] || 'unknown';
+    const usage = kubernetesPodMetrics(data, pod);
+    const metricsAvailable = data.metricsAvailable?.[pod.namespace];
+    const deployment = state.kubernetes.serviceModels.flatMap((service) => service.deployments).find((item) => item.namespace === pod.namespace && item.name === pod.workload);
+    const service = state.kubernetes.serviceModels.find((item) => item.namespace === pod.namespace && item.deployments.includes(deployment));
+    return `<tr data-pod-index="${podIndexes.get(pod)}" class="kubernetes-pod-row" title="Open pod insight">
+      <td><span class="kubernetes-namespace-cell">${escapeHtml(pod.namespace)}</span></td>
+      <td><button type="button" class="kubernetes-pod-open" aria-haspopup="dialog" title="${escapeHtml(pod.name)}">${escapeHtml(pod.name)}</button><small class="kubernetes-table-container-count">${escapeHtml(service?.name || 'Unmapped')} · ${escapeHtml(deployment?.module || 'Workload')} · ${(pod.containers || []).length} containers</small></td>
+      <td><span class="kubernetes-health-chip ${healthClass}"><i></i>${escapeHtml(pod.health)}</span></td>
+      <td class="kubernetes-ready-cell">${escapeHtml(pod.ready)}</td>
+      <td><span class="kubernetes-restart-cell ${pod.restarts ? 'has-restarts' : ''}">${pod.restarts}</span></td>
+      <td title="${metricsAvailable === false ? 'Metrics API unavailable in this namespace' : 'Current point-in-time Metrics API sample'}">${escapeHtml(usage?.cpu || (metricsAvailable === false ? 'N/A' : '—'))}</td>
+      <td title="${metricsAvailable === false ? 'Metrics API unavailable in this namespace' : 'Current point-in-time Metrics API sample'}">${escapeHtml(usage?.memory || (metricsAvailable === false ? 'N/A' : '—'))}</td>
+      <td><span class="kubernetes-node-cell">${escapeHtml(pod.node)}</span></td>
+      <td>${escapeHtml(pod.age)}</td>
+    </tr>`;
+  }).join('');
+  const empty = document.getElementById('kubernetesEmptyState');
+  empty.hidden = pods.length > 0;
+  empty.textContent = (data.pods || []).length ? 'No pods match these filters.' : 'No pods were returned for this approved namespace scope.';
+  document.getElementById('kubernetesTableMeta').textContent = `${pods.length} of ${(data.pods || []).length} pods · Updated ${new Date(data.fetchedAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' })}`;
 }
 
 let currentOpsAnalyticsData = null;
@@ -9359,7 +10516,7 @@ function renderOpsAnalytics(data) {
 
 function filterFleetByCountry(countryCode) {
   if (!countryCode || countryCode === 'OTHER') return;
-  openFleetView();
+  openFleetView({ loadFleet: false });
   const select = document.getElementById('fleetCountrySelect');
   if (select) {
     select.value = countryCode;
@@ -9370,7 +10527,7 @@ function filterFleetByCountry(countryCode) {
 
 function filterFleetByStatus(status) {
   if (!status) return;
-  openFleetView();
+  openFleetView({ loadFleet: false });
   const select = document.getElementById('fleetStatusSelect');
   if (select) {
     select.value = status;
@@ -9381,7 +10538,7 @@ function filterFleetByStatus(status) {
 
 function filterFleetByFirmware(version) {
   if (!version) return;
-  openFleetView();
+  openFleetView({ loadFleet: false });
   const select = document.getElementById('fleetVersionSelect');
   if (select) {
     select.value = version;
@@ -9532,49 +10689,61 @@ async function updateFleetKpiMetrics() {
     kpiFirmwaresCount.textContent = `${firmwares.length} tracked version releases (${env})`;
   }
 
-  // Fetch live fleet size & availability counts for this environment
+  // The table request supplies the fleet total; only request the available count here.
   try {
-    const [totalRes, availRes] = await Promise.allSettled([
-      fetch(dashboardApiUrl(`/api/wallbox-list?env=${encodeURIComponent(env)}&page=0&size=1`)).then((r) => r.json()),
-      fetch(dashboardApiUrl(`/api/wallbox-list?env=${encodeURIComponent(env)}&status=Available&page=0&size=1`)).then((r) => r.json()),
-    ]);
-
-    let total = 0;
-    if (totalRes.status === 'fulfilled' && totalRes.value && totalRes.value.ok) {
-      total = totalRes.value.data?.totalElements ?? 0;
-    }
-    let available = 0;
-    if (availRes.status === 'fulfilled' && availRes.value && availRes.value.ok) {
-      available = availRes.value.data?.totalElements ?? 0;
-    }
-    const disconnected = Math.max(0, total - available);
-
-    if (kpiFleetTotal) {
-      kpiFleetTotal.textContent = total.toLocaleString();
-    }
-    if (kpiFleetDesc) {
-      kpiFleetDesc.textContent = `Registered ${env} wallbox units`;
-    }
-
-    if (kpiAvailBadge) {
-      kpiAvailBadge.textContent = `● ${formatKpiNumber(available)} Available`;
-    }
-    if (kpiDiscBadge) {
-      kpiDiscBadge.textContent = `● ${formatKpiNumber(disconnected)} Disconnected`;
-    }
-
-    const availPct = total > 0 ? Math.round((available / total) * 100) : 0;
-    const discPct = total > 0 ? 100 - availPct : 0;
-
-    if (kpiAvailBar) {
-      kpiAvailBar.style.width = `${availPct}%`;
-    }
-    if (kpiDiscBar) {
-      kpiDiscBar.style.width = `${discPct}%`;
-    }
+    const response = await fetch(dashboardApiUrl(`/api/wallbox-list?env=${encodeURIComponent(env)}&status=Available&page=0&size=1`));
+    const data = await response.json();
+    if (env.toLowerCase() !== state.currentEnv) return;
+    const availableValue = data?.data?.totalElements;
+    const available = data?.ok && availableValue != null ? Number(availableValue) : NaN;
+    state.fleet.availableElements = Number.isFinite(available) ? available : null;
+    state.fleet.availableEnvironment = env.toLowerCase();
+    renderFleetAvailabilityKpis(env.toLowerCase());
   } catch (err) {
+    if (env.toLowerCase() === state.currentEnv) {
+      state.fleet.availableElements = null;
+      state.fleet.availableEnvironment = env.toLowerCase();
+      renderFleetAvailabilityKpis(env.toLowerCase());
+    }
     console.warn('Could not refresh fleet availability KPIs:', err);
   }
+}
+
+function renderFleetAvailabilityKpis(environment) {
+  const env = String(environment || state.currentEnv || 'prod').toLowerCase();
+  if (env !== state.currentEnv) return;
+
+  const total = state.fleet.totalEnvironment === env ? state.fleet.totalElements : null;
+  const available = state.fleet.availableEnvironment === env ? state.fleet.availableElements : null;
+  const totalElement = document.getElementById('kpiFleetTotal');
+  const availableBadge = document.getElementById('kpiAvailBadge');
+  const disconnectedBadge = document.getElementById('kpiDiscBadge');
+  const availableBar = document.getElementById('kpiAvailBar');
+  const disconnectedBar = document.getElementById('kpiDiscBar');
+
+  if (totalElement) {
+    totalElement.textContent = total != null
+      ? total.toLocaleString()
+      : state.fleet.totalEnvironment === env ? '—' : '...';
+  }
+  if (availableBadge) {
+    const availableText = available != null
+      ? formatKpiNumber(available)
+      : state.fleet.availableEnvironment === env ? '—' : '...';
+    availableBadge.textContent = `● ${availableText} Available`;
+  }
+
+  const disconnected = total != null && available != null ? Math.max(0, total - available) : null;
+  if (disconnectedBadge) {
+    const disconnectedText = disconnected != null
+      ? formatKpiNumber(disconnected)
+      : state.fleet.totalEnvironment === env || state.fleet.availableEnvironment === env ? '—' : '...';
+    disconnectedBadge.textContent = `● ${disconnectedText} Disconnected`;
+  }
+
+  const availablePercent = total > 0 && available != null ? Math.round((available / total) * 100) : 0;
+  if (availableBar) availableBar.style.width = `${availablePercent}%`;
+  if (disconnectedBar) disconnectedBar.style.width = `${total != null && available != null ? 100 - availablePercent : 0}%`;
 }
 
 async function setEnvironment(env) {
@@ -9595,7 +10764,7 @@ async function setEnvironment(env) {
       syncStatus.title = `Firmware management environment: ${normalized.toUpperCase()}`;
     }
     await checkLiveTokenHealth();
-    if (!await loadStoredTokenFromLocalBridge()) {
+    if (!await loadStoredTokenFromLocalBridge({ scanBrowser: true })) {
       await retryLoginFromScratch();
     }
     return;
@@ -9614,9 +10783,9 @@ async function setEnvironment(env) {
   await checkLiveTokenHealth();
 
   // Check and load token for the new environment
-  const hasValidToken = await loadStoredTokenFromLocalBridge();
+  const hasValidToken = await loadStoredTokenFromLocalBridge({ scanBrowser: true });
   if (!hasValidToken) {
-    setStatus(`Retrieving ${normalized.toUpperCase()} session token... Please sign in in the opened browser tab.`, 'warning');
+    setStatus(`Retrieving ${normalized.toUpperCase()} session token... Opening TME in a browser tab if needed.`, 'warning');
     await retryLoginFromScratch();
   } else {
     setStatus(`Connected to ${normalized.toUpperCase()} fleet.`, 'success');
@@ -9645,6 +10814,7 @@ async function loadFleetMetadata() {
       fetch(dashboardApiUrl(`/api/wallbox-statuses?env=${encodeURIComponent(env)}`)).then((r) => r.json()),
       fetch(dashboardApiUrl(`/api/firmware-versions?env=${encodeURIComponent(env)}`)).then((r) => r.json()),
     ]);
+    if (env !== state.currentEnv) return;
 
     if (modelsRes.status === 'fulfilled' && modelsRes.value && modelsRes.value.ok) {
       const models = modelsRes.value.items || (modelsRes.value.data && modelsRes.value.data.models) || [];
@@ -10143,6 +11313,7 @@ async function fetchFleetWallboxes(page = 0) {
   try {
     const res = await fetch(dashboardApiUrl(`/api/wallbox-list?${params.toString()}`));
     const data = await res.json();
+    if (env !== state.currentEnv) return;
 
     if (!data || !data.ok) {
       if (res.status === 401 || data?.authError) {
@@ -10159,14 +11330,18 @@ async function fetchFleetWallboxes(page = 0) {
     state.fleet.items = content;
     state.fleet.totalElements = totalElements;
     state.fleet.totalPages = totalPages;
+    state.fleet.totalEnvironment = env;
 
-    const kpiTotal = document.getElementById('kpiFleetTotal');
-    if (kpiTotal) kpiTotal.textContent = totalElements.toLocaleString();
+    renderFleetAvailabilityKpis(env);
 
     renderFleetTableRows(content);
     updateFleetPagination(page, size, totalElements, totalPages);
   } catch (err) {
+    if (env !== state.currentEnv) return;
     state.fleet.error = err.message;
+    state.fleet.totalElements = null;
+    state.fleet.totalEnvironment = env;
+    renderFleetAvailabilityKpis(env);
     if (tbody) {
       tbody.innerHTML = `
         <tr>
@@ -10179,7 +11354,7 @@ async function fetchFleetWallboxes(page = 0) {
       `;
     }
   } finally {
-    state.fleet.loading = false;
+    if (env === state.currentEnv) state.fleet.loading = false;
   }
 }
 
@@ -10624,6 +11799,12 @@ function initializeSharedTopbar({ fotaOnly = false } = {}) {
   if (__sharedTopbarInitialized || !document.getElementById('globalTokenRefresh')) return;
   __sharedTopbarInitialized = true;
   __fotaHeaderOnly = fotaOnly;
+  const loadLogsForSelection = () => {
+    cancelKubernetesLogRequest();
+    state.kubernetes.logSnapshot = null;
+    state.kubernetes.logError = '';
+    void fetchKubernetesLogs();
+  };
   window.addEventListener('dashboard-session-ready', () => {
     if (__fotaHeaderOnly || !__dashboardNeedsInitialTokenRefresh) return;
     __dashboardNeedsInitialTokenRefresh = false;
@@ -10699,6 +11880,141 @@ function initializeSharedTopbar({ fotaOnly = false } = {}) {
       openOpsAnalyticsView();
     }
   });
+
+  document.getElementById('topbarKubernetesBtn')?.addEventListener('click', (event) => {
+    event.preventDefault();
+    if (__fotaHeaderOnly) {
+      window.location.assign('/#kubernetes');
+    } else if (state.currentView === 'kubernetes') {
+      openFleetView();
+    } else {
+      openKubernetesPodsView();
+    }
+  });
+
+  document.getElementById('kubernetesNamespaceSelect')?.addEventListener('change', (event) => {
+    state.kubernetes.namespace = event.target.value;
+    state.kubernetes.requestId += 1;
+    state.kubernetes.inventoryLoading = false;
+    state.kubernetes.result = null;
+    state.kubernetes.infrastructure = null;
+    state.kubernetes.infrastructureError = '';
+    state.kubernetes.infrastructureNamespace = '';
+    state.kubernetes.infrastructureFetchedAt = 0;
+    state.kubernetes.infrastructureRequestId += 1;
+    state.kubernetes.infrastructureLoading = false;
+    state.kubernetes.activePod = null;
+    state.kubernetes.activeServiceKey = '';
+    state.kubernetes.logPod = null;
+    state.kubernetes.logSnapshot = null;
+    state.kubernetes.logError = '';
+    cancelKubernetesLogRequest();
+    window.clearInterval(state.kubernetes.logTimer);
+    state.kubernetes.logTimer = null;
+    document.getElementById('kubernetesPodDetailDialog').close();
+    document.getElementById('kubernetesErrorMessage').hidden = true;
+    renderKubernetesAuth();
+    if (state.kubernetes.auth === 'ready') void fetchKubernetesPods();
+  });
+  document.getElementById('kubernetesTimeRange')?.addEventListener('change', (event) => {
+    state.kubernetes.timeRange = event.target.value;
+    state.kubernetes.timelineWindow = null;
+    if (state.kubernetes.result) renderKubernetesPods(state.kubernetes.result);
+  });
+  document.getElementById('kubernetesRefreshBtn')?.addEventListener('click', () => {
+    if (state.kubernetes.auth === 'ready') void fetchKubernetesPods(true);
+    else void checkKubernetesCredentials();
+  });
+  document.getElementById('kubernetesLoginBtn')?.addEventListener('click', () => void startKubernetesLogin());
+  document.getElementById('kubernetesGlobalSearch')?.addEventListener('input', () => {
+    renderKubernetesServiceGrid();
+    const service = state.kubernetes.serviceModels.find((item) => item.key === state.kubernetes.activeServiceKey);
+    if (service) renderKubernetesServicePods(service);
+    renderKubernetesPodTable();
+  });
+  document.getElementById('kubernetesServiceSort')?.addEventListener('change', renderKubernetesServiceGrid);
+  document.getElementById('kubernetesServiceHealthFilter')?.addEventListener('change', renderKubernetesServiceGrid);
+  document.getElementById('kubernetesServiceGrid')?.addEventListener('click', (event) => {
+    const tile = event.target.closest('[data-service-key]');
+    if (!tile) return;
+    const nextKey = tile.dataset.serviceKey;
+    if (nextKey !== state.kubernetes.activeServiceKey) {
+      window.clearInterval(state.kubernetes.logTimer);
+      state.kubernetes.logTimer = null;
+      cancelKubernetesLogRequest();
+      state.kubernetes.logSnapshot = null;
+      state.kubernetes.logError = '';
+      state.kubernetes.logPod = null;
+      state.kubernetes.activePod = null;
+      state.kubernetes.logTarget = 'service';
+      document.getElementById('kubernetesServiceLogsLiveToggle').setAttribute('aria-pressed', 'false');
+      document.getElementById('kubernetesServiceLogsLiveToggle').textContent = 'Start live';
+    }
+    state.kubernetes.activeServiceKey = nextKey;
+    renderKubernetesServiceGrid();
+    renderKubernetesServiceDetail();
+  });
+  document.getElementById('kubernetesServiceDetailClose')?.addEventListener('click', () => {
+    state.kubernetes.activeServiceKey = '';
+    state.kubernetes.logPod = null;
+    state.kubernetes.logSnapshot = null;
+    state.kubernetes.logError = '';
+    cancelKubernetesLogRequest();
+    window.clearInterval(state.kubernetes.logTimer);
+    state.kubernetes.logTimer = null;
+    document.getElementById('kubernetesServiceDetail').hidden = true;
+    renderKubernetesServiceGrid();
+  });
+  document.getElementById('kubernetesServicePods')?.addEventListener('click', (event) => {
+    const key = event.target.closest('[data-pod-key]')?.dataset.podKey;
+    const pod = state.kubernetes.result?.pods?.find((item) => `${item.namespace}/${item.name}` === key);
+    if (pod) openKubernetesPodDetail(pod);
+  });
+  document.getElementById('kubernetesServiceLogPod')?.addEventListener('change', selectKubernetesServiceLogPod);
+  document.getElementById('kubernetesSearchInput')?.addEventListener('input', renderKubernetesPodTable);
+  document.getElementById('kubernetesHealthFilter')?.addEventListener('change', renderKubernetesPodTable);
+  document.getElementById('kubernetesPodSort')?.addEventListener('change', renderKubernetesPodTable);
+  ['kubernetesTimelineSourceFilter', 'kubernetesTimelineSeverityFilter'].forEach((id) => {
+    document.getElementById(id)?.addEventListener('change', () => {
+      if (!state.kubernetes.result) return;
+      renderKubernetesTimeline(state.kubernetes.result);
+      const service = state.kubernetes.serviceModels.find((item) => item.key === state.kubernetes.activeServiceKey);
+      if (service) renderKubernetesTimeline(state.kubernetes.result, 'all', 'kubernetesServiceTimeline', service.pods);
+    });
+  });
+  document.getElementById('kubernetesPodsTableBody')?.addEventListener('click', (event) => {
+    const row = event.target.closest('tr[data-pod-index]');
+    const pod = state.kubernetes.result?.pods?.[Number(row?.dataset.podIndex)];
+    if (pod) openKubernetesPodDetail(pod);
+  });
+  document.getElementById('kubernetesPodDetailClose')?.addEventListener('click', () => {
+    document.getElementById('kubernetesPodDetailDialog')?.close();
+  });
+  document.getElementById('kubernetesPodDetailDialog')?.addEventListener('close', () => {
+    state.kubernetes.activePod = null;
+    cancelKubernetesLogRequest();
+    window.clearInterval(state.kubernetes.logTimer);
+    state.kubernetes.logTimer = null;
+    const service = state.kubernetes.serviceModels.find((item) => item.key === state.kubernetes.activeServiceKey);
+    if (service) {
+      state.kubernetes.logTarget = 'service';
+      renderKubernetesServiceLogs(service);
+    } else {
+      state.kubernetes.logTarget = 'pod';
+      state.kubernetes.logPod = null;
+    }
+  });
+  document.getElementById('kubernetesPodDetailDialog')?.addEventListener('click', (event) => {
+    if (event.target === event.currentTarget) event.currentTarget.close();
+  });
+  ['kubernetesLogContainer', 'kubernetesLogInstance', 'kubernetesLogWindow', 'kubernetesServiceLogContainer', 'kubernetesServiceLogInstance', 'kubernetesServiceLogWindow'].forEach((id) => {
+    document.getElementById(id)?.addEventListener('change', loadLogsForSelection);
+  });
+  ['kubernetesLogFilter', 'kubernetesServiceLogFilter'].forEach((id) => document.getElementById(id)?.addEventListener('change', renderKubernetesLogOutput));
+  document.getElementById('kubernetesLogsRefresh')?.addEventListener('click', () => void fetchKubernetesLogs());
+  document.getElementById('kubernetesServiceLogsRefresh')?.addEventListener('click', () => void fetchKubernetesLogs());
+  document.getElementById('kubernetesLogsLiveToggle')?.addEventListener('click', (event) => toggleKubernetesLogPolling(event.currentTarget, false));
+  document.getElementById('kubernetesServiceLogsLiveToggle')?.addEventListener('click', (event) => toggleKubernetesLogPolling(event.currentTarget, true));
 
   document.getElementById('globalTokenRefresh')?.addEventListener('click', async (event) => {
     event.stopPropagation();
@@ -11023,6 +12339,8 @@ async function startDashboardApp() {
       if (s) openChargerDashboard(s);
     } else if (hash === '#analytics' || hash === '#ops') {
       openOpsAnalyticsView();
+    } else if (hash === '#kubernetes') {
+      openKubernetesPodsView();
     } else {
       openFleetView();
     }
@@ -11158,9 +12476,10 @@ async function startDashboardApp() {
 
   await loadSerialHistoryFromServer();
 
-  const tokenLoaded = await loadStoredTokenFromLocalBridge();
+  const initialKubernetesView = window.location.hash === '#kubernetes';
+  const tokenLoaded = initialKubernetesView || await loadStoredTokenFromLocalBridge({ scanBrowser: true });
   if (!tokenLoaded) {
-    setStatus('PROD session required. Please sign in in the opened browser tab or click Refresh.', 'warning');
+    setStatus('PROD session required. Opening the TME page in a browser tab if needed.', 'warning');
     await triggerAutoTokenCapture();
   }
 
@@ -11187,10 +12506,10 @@ async function startDashboardApp() {
     openChargerDashboard(initialSerial);
   } else if (window.location.hash === '#analytics' || window.location.hash === '#ops') {
     openOpsAnalyticsView();
+  } else if (initialKubernetesView) {
+    openKubernetesPodsView();
   } else {
     openFleetView();
-    fetchOutages();
-    fetchFleetWallboxes(0);
   }
 
   // Load fleet metadata in background without blocking wallbox rendering
@@ -11209,7 +12528,7 @@ if (typeof window !== 'undefined') {
     initializeSharedTopbar({ fotaOnly: true });
     window.dispatchEvent(new CustomEvent('dashboard-environment-change', { detail: { environment: 'prod' } }));
     void (async () => {
-      if (!await loadStoredTokenFromLocalBridge()) {
+      if (!await loadStoredTokenFromLocalBridge({ scanBrowser: true })) {
         await triggerAutoTokenCapture();
       }
     })();

@@ -140,11 +140,11 @@ def read_saved_token(env="prod", allow_browser_scan=False, app="charger"):
     if token and not is_token_expired(token) and is_tme_token(token, env=norm_env):
         return token
 
-    if allow_browser_scan and norm_app == "charger":
+    if allow_browser_scan:
         try:
             token = capture_token_from_browser(norm_env)
             if token and not is_token_expired(token) and is_tme_token(token, env=norm_env):
-                write_saved_token(token, env=norm_env)
+                write_saved_token(token, env=norm_env, app=norm_app)
                 return token
         except Exception:
             pass

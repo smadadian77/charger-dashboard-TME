@@ -60,6 +60,16 @@ npm run test:all
 
 Frontend tests use Angular's Vitest builder. Backend tests use Python's standard-library `unittest` with synthetic data and do not call TME or AI services.
 
+## ChargeDot Manufacturer Data
+
+The charger detail view loads ChargeDot manufacturer data through the local Python API. ABB client credentials must be configured on the dashboard server, not in Angular or the browser:
+
+- `CHARGEDOT_CLIENT_ID`
+- `CHARGEDOT_CLIENT_SECRET`
+- `CHARGEDOT_ORG_ID`
+
+Install the Python `cryptography` package in the server environment if it is not already available. Restart the dashboard server after setting these variables. PIN, SIM identifiers, and RFID card data are returned only by the loopback-restricted endpoint and are hidden in the UI until revealed.
+
 ## Project Structure
 ```
 Charger-Dashboard-Angular/

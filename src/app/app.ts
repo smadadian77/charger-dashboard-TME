@@ -22,7 +22,7 @@ export class App implements AfterViewInit {
 
   ngAfterViewInit(): void {
     const script = document.createElement('script');
-    script.src = '/dashboard-engine.js';
+    script.src = `/dashboard-engine.js?v=${Date.now()}`;
     script.async = true;
     script.addEventListener('load', () => {
       if (this.isFotaRoute) {
@@ -34,6 +34,16 @@ export class App implements AfterViewInit {
         () => window.initToyotaDashboard,
         (callback, delay) => window.setTimeout(callback, delay)
       );
+      document.getElementById('kubernetesServiceGrid')?.addEventListener('click', (event: MouseEvent) => {
+        if (!(event.target instanceof Element) || !event.target.closest('.kubernetes-service-tile')) return;
+        window.setTimeout(() => {
+          const detail = document.getElementById('kubernetesServiceDetail');
+          if (!detail || detail.hidden) return;
+          const headerHeight = document.querySelector('.topbar')?.getBoundingClientRect().height || 0;
+          const top = detail.getBoundingClientRect().top + window.scrollY - headerHeight - 12;
+          window.scrollTo({ top, behavior: 'smooth' });
+        }, 0);
+      });
     }, { once: true });
     script.addEventListener('error', () => console.error('Dashboard engine failed to load.'), { once: true });
     document.head.append(script);
