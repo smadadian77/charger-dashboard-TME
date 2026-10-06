@@ -143,6 +143,7 @@
         <nav class="topbar-nav fota-view-nav" aria-label="Firmware views" [hidden]="!isFotaRoute">
           <a class="topbar-nav-link" href="/fota/packages" [class.active]="currentPath === '/fota/packages' || currentPath === '/fota'" [attr.aria-current]="currentPath === '/fota/packages' || currentPath === '/fota' ? 'page' : null">Packages</a>
           <a class="topbar-nav-link" href="/fota/campaigns" [class.active]="currentPath.startsWith('/fota/campaigns')" [attr.aria-current]="currentPath.startsWith('/fota/campaigns') ? 'page' : null">Campaigns</a>
+          <a class="topbar-nav-link" href="/fota/matrix" [class.active]="currentPath === '/fota/matrix'" [attr.aria-current]="currentPath === '/fota/matrix' ? 'page' : null">Upload matrix</a>
           <a class="topbar-nav-link" href="/fota/beta/packages" [class.active]="currentPath === '/fota/beta/packages'" [attr.aria-current]="currentPath === '/fota/beta/packages' ? 'page' : null">Beta packages</a>
           <a class="topbar-nav-link" href="/fota/beta/campaigns" [class.active]="currentPath.startsWith('/fota/beta/campaigns')" [attr.aria-current]="currentPath.startsWith('/fota/beta/campaigns') ? 'page' : null">Beta campaigns</a>
           <a class="topbar-nav-link" href="/fota/beta/wallboxes" [class.active]="currentPath === '/fota/beta/wallboxes'" [attr.aria-current]="currentPath === '/fota/beta/wallboxes' ? 'page' : null">Beta wallboxes</a>
@@ -1347,15 +1348,24 @@
       <main id="kubernetesPodsView" class="kubernetes-view" hidden>
         <section class="kubernetes-heading">
           <div class="kubernetes-heading-copy">
-            <p class="kubernetes-eyebrow">PRODUCTION OPERATIONS <span></span> SERVICE OBSERVABILITY</p>
-            <h2>Production services</h2>
-            <p class="kubernetes-subtitle">Live signals from the two approved production namespaces.</p>
+            <p class="kubernetes-eyebrow">KUBERNETES OPERATIONS <span></span> SERVICE OBSERVABILITY</p>
+            <h2 id="kubernetesEnvironmentHeading">Production services</h2>
+            <p id="kubernetesEnvironmentDescription" class="kubernetes-subtitle">Live signals from the approved production namespaces.</p>
           </div>
           <div class="kubernetes-controls">
             <label>
+              <span>Environment</span>
+              <select id="kubernetesEnvironmentSelect" aria-label="Kubernetes environment">
+                <option value="prod">PROD</option>
+                <option value="acc">ACC</option>
+                <option value="prev">PREV</option>
+                <option value="dev">DEV</option>
+              </select>
+            </label>
+            <label>
               <span>Namespace scope</span>
               <select id="kubernetesNamespaceSelect" aria-label="Kubernetes namespace scope">
-                <option value="all">Both production namespaces</option>
+                <option value="all">All namespaces</option>
                 <option value="tme-ns-ev-backend-prd">tme-ns-ev-backend-prd</option>
                 <option value="tme-ns-ev-virtual-gateway-prd">tme-ns-ev-virtual-gateway-prd</option>
               </select>
@@ -1369,7 +1379,7 @@
                 <option value="24h">24 hours</option>
               </select>
             </label>
-            <button type="button" class="kubernetes-refresh-button" id="kubernetesRefreshBtn" title="Refresh production pod data" aria-label="Refresh production pod data">
+            <button type="button" class="kubernetes-refresh-button" id="kubernetesRefreshBtn" title="Refresh pod data" aria-label="Refresh pod data">
               <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2"><path d="M21.5 2v6h-6M21.3 15.6A10 10 0 1 1 20.9 7l.6 1"/></svg>
             </button>
           </div>
@@ -1405,7 +1415,7 @@
         <p id="kubernetesAvailabilityNotice" class="kubernetes-availability-notice" role="status" hidden></p>
 
         <div id="kubernetesDataView" hidden>
-          <section class="kubernetes-summary-grid" aria-label="Production service health">
+          <section id="kubernetesSummaryGrid" class="kubernetes-summary-grid" aria-label="Service health">
             <article class="kubernetes-summary-item critical"><span class="kubernetes-summary-label">Critical</span><strong id="kubernetesCriticalServiceCount">--</strong><span>Services with unavailable modules or infrastructure</span></article>
             <article class="kubernetes-summary-item warning"><span class="kubernetes-summary-label">Warning</span><strong id="kubernetesWarningServiceCount">--</strong><span>Degraded replicas or recent warning signals</span></article>
             <article class="kubernetes-summary-item"><span class="kubernetes-summary-label">Healthy</span><strong id="kubernetesHealthyServiceCount">--</strong><span>All observed replicas available</span></article>
@@ -1504,7 +1514,7 @@
                 <label><span>Severity</span><select id="kubernetesTimelineSeverityFilter" aria-label="Filter timeline severity"><option value="all">All severity</option><option value="critical">Critical</option><option value="warning">Warning</option><option value="info">Info</option></select></label>
               </div>
             </div>
-            <div id="kubernetesOperationalTimeline" class="kubernetes-operational-timeline" aria-label="Unified production operations timeline"></div>
+            <div id="kubernetesOperationalTimeline" class="kubernetes-operational-timeline" aria-label="Unified operations timeline"></div>
             <p id="kubernetesTimelineNote" class="kubernetes-data-note"></p>
           </section>
 
@@ -1607,6 +1617,24 @@
                 <button id="kubernetesLogsRefresh" type="button" class="kubernetes-secondary-button">Load logs</button>
               </div>
               <pre id="kubernetesPodLogs" class="kubernetes-pod-logs" tabindex="0" aria-label="Pod container logs">Select a container and load recent logs.</pre>
+            </section>
+            <section class="kubernetes-detail-section kubernetes-terminal-section" aria-labelledby="kubernetesTerminalTitle">
+              <div class="kubernetes-logs-heading">
+                <div><h4 id="kubernetesTerminalTitle">Live pod CLI</h4><p id="kubernetesTerminalEnvironment">Interactive shell through the selected EKS profile</p></div>
+                <span id="kubernetesTerminalStatus" class="kubernetes-terminal-status" role="status">Session stopped</span>
+              </div>
+              <p class="kubernetes-terminal-warning">Commands run inside the selected container and can change its state. This shell has no TTY, so full-screen tools, job control, and terminal resizing are unavailable.</p>
+              <div class="kubernetes-terminal-controls">
+                <label><span>Container</span><select id="kubernetesTerminalContainer" aria-label="Terminal container"></select></label>
+                <button id="kubernetesTerminalStart" class="kubernetes-secondary-button" type="button">Start shell</button>
+                <button id="kubernetesTerminalStop" class="kubernetes-secondary-button" type="button" disabled>End session</button>
+              </div>
+              <pre id="kubernetesTerminalOutput" class="kubernetes-terminal-output" tabindex="0" aria-label="Pod shell output">Start a shell to run a command in this container.</pre>
+              <form id="kubernetesTerminalForm" class="kubernetes-terminal-input-row">
+                <label class="sr-only" for="kubernetesTerminalInput">Shell command</label>
+                <textarea id="kubernetesTerminalInput" rows="2" placeholder="Enter a shell command" disabled></textarea>
+                <button id="kubernetesTerminalSend" class="kubernetes-secondary-button" type="submit" disabled>Send</button>
+              </form>
             </section>
           </div>
         </dialog>

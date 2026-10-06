@@ -9,7 +9,7 @@ from backend.config import get_api_url, get_fota_webapp_origin, normalize_env
 
 FOTA_READ_TIMEOUT_SECONDS = 20
 MAX_PAGE_SIZE = 100
-PACKAGE_FILTERS = {"vendor", "model", "version", "isPushable", "approvalStatus"}
+PACKAGE_FILTERS = {"vendor", "model", "version", "isPushable", "approvalStatus", "unassignedCampaign"}
 WALLBOX_FILTERS = {"serialNumber", "model", "version", "status", "countryIds"}
 
 
@@ -90,7 +90,7 @@ def _get_json(path, env, token, params=None, client_id=None):
 def list_packages(env, token, page=0, size=5, beta=False, filters=None):
     params = _page_parameters(page, size, beta)
     params.update(_filter_parameters(filters, PACKAGE_FILTERS))
-    return _get_json("/v2/fota-management/v2/firmware", env, token, params)
+    return _get_json("/v1/firmware", env, token, params, client_id="ctp")
 
 
 def get_package(env, token, version, model, beta):
@@ -104,12 +104,13 @@ def get_package(env, token, version, model, beta):
         f"/v1/firmware/{quote(version, safe='')}/{quote(model, safe='')}/{str(beta).lower()}",
         env,
         token,
+        client_id="ctp",
     )
 
 
 def list_campaigns(env, token, page=0, size=5, beta=False):
     params = _page_parameters(page, size, beta)
-    return _get_json("/v1/campaign", env, token, params)
+    return _get_json("/v1/campaign", env, token, params, client_id="ctp")
 
 
 def list_launched_campaigns(env, token, country_id, charger_model):
@@ -153,5 +154,9 @@ def get_filter_metadata(env, token):
         "models": _get_json("/v1/wallboxes/models", env, token, client_id="tme"),
         "versions": _get_json("/v1/firmwares/version", env, token, client_id="tme"),
         "statuses": _get_json("/v1/wallboxes/connectors/0/status", env, token, client_id="tme"),
-        "countries": _get_json("/v1/fota/countries", env, token, client_id="tme"),
+        "countries": _get_json("/v1/fota/countries", env, token, client_id="ctp"),
     }
+
+
+def get_model_matrix(env, token):
+    return _get_json("/v1/wallboxes/model", env, token, client_id="ctp")

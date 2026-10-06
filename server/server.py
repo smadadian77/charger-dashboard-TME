@@ -1,11 +1,14 @@
 import base64
 from concurrent.futures import ThreadPoolExecutor
+import hashlib
 import json
 import math
 import mimetypes
 import os
+import queue
 import re
 import socket
+import struct
 import subprocess
 import sys
 import threading
@@ -125,6 +128,7 @@ from backend.services.outages_service import (
 )
 from backend.services.fota_service import (
     FotaReadError,
+    get_model_matrix,
     get_filter_metadata,
     get_package,
     get_wallbox_membership,
@@ -146,6 +150,7 @@ from backend.services.kubernetes_service import (
     get_node_infrastructure as get_kubernetes_node_infrastructure,
     get_pod_logs as get_kubernetes_pod_logs,
     list_pods as list_kubernetes_pods,
+    start_pod_terminal as start_kubernetes_pod_terminal,
     start_sso_login as start_kubernetes_sso_login,
 )
 from backend.services.chargedot_service import ChargeDotError, get_charger_data as get_chargedot_data
@@ -168,6 +173,90 @@ TOKEN_CAPTURE_FRESHNESS_LOCK = threading.Lock()
 _compute_ops_analytics = compute_ops_analytics
 _build_fallback_ops_analytics = build_fallback_ops_analytics
 
+
+
+def _receive_websocket_bytes(connection, size):
+    chunks = bytearray()
+    while len(chunks) < size:
+        chunk = connection.recv(size - len(chunks))
+        if not chunk:
+            return None
+        chunks.extend(chunk)
+    return bytes(chunks)
+
+
+def _read_websocket_frame(connection):
+    header = _receive_websocket_bytes(connection, 2)
+    if header is None:
+        return "close", b""
+    first, second = header
+    final = bool(first & 0x80)
+    opcode = first & 0x0F
+    length = second & 0x7F
+    if first & 0x70 or not second & 0x80 or (opcode < 8 and not final):
+        raise ValueError("Invalid WebSocket frame.")
+    if length == 126:
+        extended = _receive_websocket_bytes(connection, 2)
+        if extended is None:
+            return "close", b""
+        length = struct.unpack("!H", extended)[0]
+    elif length == 127:
+        extended = _receive_websocket_bytes(connection, 8)
+        if extended is None:
+            return "close", b""
+        length = struct.unpack("!Q", extended)[0]
+    if length > 65536 or (opcode >= 8 and length > 125):
+        raise ValueError("WebSocket message is too large.")
+    mask = _receive_websocket_bytes(connection, 4)
+    payload = _receive_websocket_bytes(connection, length)
+    if mask is None or payload is None:
+        return "close", b""
+    decoded = bytes(value ^ mask[index & 3] for index, value in enumerate(payload))
+    if opcode == 1:
+        decoded.decode("utf-8")
+    return opcode, decoded
+
+
+def _write_websocket_frame(connection, opcode, payload=b""):
+    length = len(payload)
+    if length < 126:
+        header = bytes((0x80 | opcode, length))
+    elif length <= 65535:
+        header = bytes((0x80 | opcode, 126)) + struct.pack("!H", length)
+    else:
+        header = bytes((0x80 | opcode, 127)) + struct.pack("!Q", length)
+    connection.sendall(header + payload)
+
+
+def _read_kubernetes_terminal_input(connection, incoming):
+    try:
+        while True:
+            opcode, payload = _read_websocket_frame(connection)
+            if opcode == "close" or opcode == 8:
+                incoming.put(("close", b""))
+                return
+            if opcode == 9:
+                incoming.put(("ping", payload))
+            elif opcode == 1:
+                incoming.put(("input", payload))
+            else:
+                incoming.put(("close", b""))
+                return
+    except (ConnectionError, OSError, UnicodeDecodeError, ValueError):
+        incoming.put(("close", b""))
+
+
+def _read_kubernetes_terminal_output(stream, outgoing):
+    try:
+        while True:
+            chunk = os.read(stream.fileno(), 4096)
+            if not chunk:
+                break
+            outgoing.put(chunk)
+    except (OSError, ValueError):
+        pass
+    finally:
+        outgoing.put(None)
 
 
 class AppHandler(BaseHTTPRequestHandler):
@@ -198,8 +287,112 @@ class AppHandler(BaseHTTPRequestHandler):
         self.send_header("Access-Control-Allow-Headers", "Content-Type, Authorization, X-Wallbox-Env")
         self.end_headers()
 
+    def _handle_kubernetes_terminal(self, parsed):
+        origin = self.headers.get("Origin")
+        if not origin or not is_loopback_local_request(self.client_address[0], origin):
+            self._send_json({"ok": False, "message": "Kubernetes terminal access is restricted to the local application."}, status=403)
+            return
+        connection_tokens = {value.strip().lower() for value in self.headers.get("Connection", "").split(",")}
+        websocket_key = self.headers.get("Sec-WebSocket-Key", "")
+        try:
+            decoded_key = base64.b64decode(websocket_key, validate=True)
+        except (ValueError, TypeError):
+            decoded_key = b""
+        if (
+            self.headers.get("Upgrade", "").lower() != "websocket"
+            or "upgrade" not in connection_tokens
+            or self.headers.get("Sec-WebSocket-Version") != "13"
+            or len(decoded_key) != 16
+        ):
+            self._send_json({"ok": False, "message": "A valid WebSocket upgrade is required."}, status=400)
+            return
+
+        params = parse_qs(parsed.query)
+        try:
+            session = start_kubernetes_pod_terminal(
+                params.get("env", [""])[0],
+                params.get("namespace", [""])[0],
+                params.get("pod", [""])[0],
+                params.get("container", [""])[0],
+            )
+        except KubernetesReadError as exc:
+            self._send_json({"ok": False, "message": str(exc)}, status=exc.status_code)
+            return
+        except Exception:
+            self._send_json({"ok": False, "message": "Unable to start the selected pod terminal."}, status=500)
+            return
+
+        accept = base64.b64encode(
+            hashlib.sha1((websocket_key + "258EAFA5-E914-47DA-95CA-C5AB0DC85B11").encode("ascii")).digest()
+        ).decode("ascii")
+        self.protocol_version = "HTTP/1.1"
+        self.send_response(101, "Switching Protocols")
+        self.send_header("Upgrade", "websocket")
+        self.send_header("Connection", "Upgrade")
+        self.send_header("Sec-WebSocket-Accept", accept)
+        self.end_headers()
+        self.wfile.flush()
+        self.close_connection = True
+
+        incoming = queue.Queue()
+        outgoing = queue.Queue()
+        reader = threading.Thread(target=_read_kubernetes_terminal_input, args=(self.connection, incoming), daemon=True)
+        output_reader = threading.Thread(target=_read_kubernetes_terminal_output, args=(session.process.stdout, outgoing), daemon=True)
+        reader.start()
+        output_reader.start()
+        output_finished = False
+        close_sent = False
+        try:
+            while True:
+                try:
+                    output = outgoing.get(timeout=0.05)
+                    if output is None:
+                        output_finished = True
+                    else:
+                        _write_websocket_frame(self.connection, 1, output.decode("utf-8", errors="replace").encode("utf-8"))
+                except queue.Empty:
+                    pass
+
+                while True:
+                    try:
+                        kind, payload = incoming.get_nowait()
+                    except queue.Empty:
+                        break
+                    if kind == "close":
+                        _write_websocket_frame(self.connection, 8, struct.pack("!H", 1000))
+                        close_sent = True
+                        return
+                    if kind == "ping":
+                        _write_websocket_frame(self.connection, 10, payload)
+                    elif session.process.stdin:
+                        session.process.stdin.write(payload)
+                        session.process.stdin.flush()
+
+                if output_finished and session.process.poll() is not None:
+                    _write_websocket_frame(self.connection, 8, struct.pack("!H", 1000))
+                    close_sent = True
+                    return
+        except (BrokenPipeError, ConnectionError, OSError):
+            return
+        finally:
+            if session.process.stdin:
+                try:
+                    session.process.stdin.close()
+                except OSError:
+                    pass
+            session.close()
+            if not close_sent:
+                try:
+                    _write_websocket_frame(self.connection, 8, struct.pack("!H", 1000))
+                except OSError:
+                    pass
+
     def do_GET(self):
         parsed = urlparse(self.path)
+
+        if parsed.path == "/api/kubernetes/terminal":
+            self._handle_kubernetes_terminal(parsed)
+            return
 
         if parsed.path.startswith("/api/kubernetes/"):
             if not is_loopback_local_request(self.client_address[0], self.headers.get("Origin")):
@@ -344,6 +537,8 @@ class AppHandler(BaseHTTPRequestHandler):
         app = self._extract_token_app()
         url_params = parse_qs(parsed.query)
         force = url_params.get("force", ["0"])[0].lower() in ("1", "true", "yes")
+        if app == "fota":
+            force = False  # FOTA reuses an already-signed-in session; never require a newly issued token.
         no_browser = url_params.get("noBrowser", ["0"])[0].lower() in ("1", "true", "yes")
         target_url = get_fota_webapp_url(env) if app == "fota" else get_dashboard_url(env)
         if not target_url:
@@ -356,8 +551,6 @@ class AppHandler(BaseHTTPRequestHandler):
             return
 
         token = read_saved_token(env, allow_browser_scan=not force, app=app)
-        if app == "fota" and not token:
-            force = True
         min_issued_at = int(time.time()) + 1 if force else 0
         freshness_key = (env, app)
         with TOKEN_CAPTURE_FRESHNESS_LOCK:
@@ -379,7 +572,7 @@ class AppHandler(BaseHTTPRequestHandler):
 
         open_browser = url_params.get("openBrowser", ["0"])[0].lower() in ("1", "true", "yes")
         browser_opened = False
-        if open_browser:
+        if open_browser and app != "fota":
             try:
                 browser_opened = bool(webbrowser.open(target_url))
             except Exception:
@@ -392,7 +585,11 @@ class AppHandler(BaseHTTPRequestHandler):
                 "env": env,
                 "app": app,
                 "url": target_url,
-                "message": f"Opening TME {app.upper()} login page for {env.upper()} ({target_url}). Token capture started...",
+                "message": (
+                    f"Scanning existing browser sessions for a TME FOTA token in {env.upper()}..."
+                    if app == "fota"
+                    else f"Opening TME {app.upper()} login page for {env.upper()} ({target_url}). Token capture started..."
+                ),
                 "capturing": True,
                 "browserOpened": browser_opened,
             })
@@ -745,6 +942,8 @@ class AppHandler(BaseHTTPRequestHandler):
                 )
             elif parsed.path == "/api/fota/metadata":
                 payload = get_filter_metadata(env, token)
+            elif parsed.path == "/api/fota/model-matrix":
+                payload = get_model_matrix(env, token)
             else:
                 self._send_json({"ok": False, "env": env, "message": "FOTA read endpoint not found."}, status=404)
                 return

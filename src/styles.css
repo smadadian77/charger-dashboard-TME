@@ -12755,6 +12755,17 @@ html[data-theme="dark"] .time-range-capsule input[type="date"]::-webkit-calendar
 .kubernetes-secondary-button, .kubernetes-live-toggle { min-height: 29px; padding: 0 9px; border: 1px solid var(--border); border-radius: 4px; background: var(--panel-soft); color: var(--text); font-size: 9px; cursor: pointer; }
 .kubernetes-live-toggle[aria-pressed="true"] { border-color: #b4232f; color: #b4232f; }
 .kubernetes-pod-logs { max-height: 280px; min-height: 110px; overflow: auto; margin: 0; padding: 9px; border: 1px solid var(--border); border-radius: 4px; background: #101820; color: #d8e2e8; font: 9px/1.5 Consolas, 'Courier New', monospace; white-space: pre-wrap; overflow-wrap: anywhere; }
+.kubernetes-terminal-section { padding-top: 14px; border-top: 1px solid var(--border); }
+.kubernetes-terminal-status { color: var(--text-muted); font-size: 9px; }
+.kubernetes-terminal-warning { margin: 9px 0; padding: 8px 10px; border-left: 3px solid #b4232f; background: rgba(180, 35, 47, 0.07); color: var(--text); font-size: 9px; line-height: 1.45; }
+.kubernetes-terminal-controls { display: flex; flex-wrap: wrap; align-items: end; gap: 7px; margin: 8px 0; }
+.kubernetes-terminal-controls label { display: grid; gap: 3px; color: var(--text-muted); font-size: 8px; }
+.kubernetes-terminal-controls select { min-width: 170px; height: 29px; padding: 0 7px; font-size: 9px; }
+.kubernetes-terminal-controls button:disabled, .kubernetes-terminal-input-row button:disabled { cursor: not-allowed; opacity: 0.55; }
+.kubernetes-terminal-output { min-height: 150px; max-height: 340px; overflow: auto; margin: 0; padding: 10px; border: 1px solid #293640; border-radius: 4px; background: #101820; color: #d8e2e8; font: 10px/1.55 Consolas, 'Courier New', monospace; white-space: pre-wrap; overflow-wrap: anywhere; }
+.kubernetes-terminal-input-row { display: flex; align-items: stretch; gap: 7px; margin-top: 7px; }
+.kubernetes-terminal-input-row textarea { min-width: 0; flex: 1; padding: 8px; border: 1px solid var(--border); border-radius: 4px; background: var(--panel); color: var(--text); font: 10px/1.45 Consolas, 'Courier New', monospace; resize: vertical; }
+.kubernetes-terminal-input-row button { align-self: stretch; }
 .kubernetes-resource-warning { display: block; color: #b4232f; font-size: 9px; }
 .kubernetes-availability-notice { margin: 0; padding: 7px 9px; border-left: 3px solid #ca7a14; background: rgba(202, 122, 20, 0.08); color: var(--text); font-size: 9px; line-height: 1.4; }
 .kubernetes-availability-notice[hidden] { display: none; }
@@ -12766,6 +12777,9 @@ html[data-theme="dark"] .time-range-capsule input[type="date"]::-webkit-calendar
   .kubernetes-attention-list { grid-template-columns: minmax(0, 1fr); }
   .kubernetes-pods-table { min-width: 900px; }
   .kubernetes-logs-controls label { flex: 1 1 125px; }
+  .kubernetes-terminal-controls label { flex: 1 1 150px; }
+  .kubernetes-terminal-controls select { width: 100%; min-width: 0; }
+  .kubernetes-terminal-input-row { align-items: end; }
 }
 
 .kubernetes-view { gap: 10px; padding-bottom: 18px; }

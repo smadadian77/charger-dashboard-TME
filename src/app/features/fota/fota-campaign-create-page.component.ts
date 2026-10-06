@@ -99,7 +99,7 @@ export class FotaCampaignCreatePageComponent implements OnInit {
               page: 0,
               size: 100,
               beta: false,
-              filters: { isPushable: true }
+              filters: { isPushable: true, unassignedCampaign: true }
             }),
             metadata: this.api.getFilterMetadata(environment)
           }).pipe(

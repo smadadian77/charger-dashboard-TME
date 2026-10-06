@@ -9,6 +9,7 @@ import {
   FotaMetadata,
   FotaMutationCapabilities,
   FotaMutationResponse,
+  FotaModelMatrixRow,
   FotaPackage,
   FotaPackageFilters,
   FotaPage,
@@ -91,6 +92,14 @@ export class FotaApiService {
   getFilterMetadata(environment: FotaEnvironment) {
     const params = this.toParams({ environment });
     return this.read(environment, this.http.get<FotaReadResponse<FotaMetadata>>('/api/fota/metadata', { params }));
+  }
+
+  getModelMatrix(environment: FotaEnvironment) {
+    const params = this.toParams({ environment });
+    return this.read(
+      environment,
+      this.http.get<FotaReadResponse<FotaPage<FotaModelMatrixRow>>>('/api/fota/model-matrix', { params })
+    );
   }
 
   private read<T>(environment: FotaEnvironment, request: Observable<T>): Observable<T> {

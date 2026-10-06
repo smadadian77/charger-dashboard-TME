@@ -1,15 +1,20 @@
 import json
+import os
 import unittest
 from types import SimpleNamespace
 from unittest.mock import patch
 
 from backend.services.kubernetes_service import (
     KubernetesReadError,
+    _CREDENTIAL_STATUS_CACHE,
     _enrich_nodes_with_aws,
+    _environment_cluster,
+    _environment_profile,
     credential_status,
     get_node_infrastructure,
     get_pod_logs,
     list_pods,
+    start_pod_terminal,
     start_sso_login,
 )
 
@@ -17,6 +22,9 @@ from backend.services.kubernetes_service import (
 class KubernetesServiceTests(unittest.TestCase):
     backend_namespace = "tme-ns-ev-backend-prd"
     gateway_namespace = "tme-ns-ev-virtual-gateway-prd"
+
+    def setUp(self):
+        _CREDENTIAL_STATUS_CACHE.clear()
 
     @patch("backend.services.kubernetes_service.subprocess.run")
     def test_credential_status_checks_only_the_allowlisted_profile(self, run):
@@ -30,6 +38,34 @@ class KubernetesServiceTests(unittest.TestCase):
             run.call_args.args[0],
             ["aws", "sts", "get-caller-identity", "--profile", "EKS-ReadOnly-067615905898", "--output", "json"],
         )
+
+    def test_environment_profiles_and_namespace_clusters_are_scoped(self):
+        environments = {
+            "dev": ("EKS-ReadOnly-465636357526", "tme-ns-ev-backend-dev", "ev-backend-eks-dev"),
+            "prev": ("EKS-ReadOnly-106643736876", "tme-ns-ev-backend-prev", "ev-backend-eks-prev"),
+            "acc": ("EKS-ReadOnly-171020041320", "tme-ns-ev-backend-uat", "ev-backend-eks-acc"),
+            "prod": ("EKS-ReadOnly-067615905898", self.backend_namespace, "ev-backend-eks-prod"),
+        }
+        for env, (profile, namespace, cluster) in environments.items():
+            with self.subTest(env=env):
+                self.assertEqual(_environment_profile(env), profile)
+                self.assertEqual(_environment_cluster(env, namespace), cluster)
+        with self.assertRaises(KubernetesReadError):
+            _environment_cluster("acc", "tme-ns-ev-backend-dev")
+
+    @patch("backend.services.kubernetes_service._run_command")
+    def test_successful_credential_status_is_cached_per_environment(self, run_command):
+        run_command.return_value = SimpleNamespace(
+            returncode=0,
+            stdout='{"Account":"465636357526","Arn":"arn:aws:sts::465636357526:assumed-role/ReadOnly/user"}',
+        )
+
+        first = credential_status("dev")
+        second = credential_status("dev")
+
+        self.assertTrue(first["authenticated"])
+        self.assertEqual(second["env"], "dev")
+        run_command.assert_called_once()
 
     @patch("backend.services.kubernetes_service.subprocess.Popen")
     def test_sso_login_uses_allowlisted_profile_without_waiting(self, popen):
@@ -241,6 +277,37 @@ class KubernetesServiceTests(unittest.TestCase):
         self.assertIn("--tail=250", command)
         self.assertIn("--limit-bytes=65536", command)
 
+    def test_terminal_is_authenticated_and_scoped_to_one_allowlisted_container(self):
+        process = SimpleNamespace(poll=lambda: None, terminate=lambda: None, wait=lambda **_kwargs: None)
+        with patch("backend.services.kubernetes_service.credential_status", return_value={"authenticated": True}), \
+                patch("backend.services.kubernetes_service._run_command", return_value=SimpleNamespace(returncode=0)), \
+                patch("backend.services.kubernetes_service.subprocess.Popen", return_value=process) as popen:
+            session = start_pod_terminal("prod", self.backend_namespace, "api-0", "api")
+            temp_dir = session.temp_dir
+            command = popen.call_args.args[0]
+            self.assertEqual(command[:3], ["kubectl", "exec", "api-0"])
+            self.assertIn(self.backend_namespace, command)
+            self.assertIn("--stdin", command)
+            self.assertIn("--kubeconfig", command)
+            self.assertEqual(command[-3:], ["--", "/bin/sh", "-i"])
+            self.assertTrue(os.path.isdir(temp_dir))
+            session.close()
+
+        self.assertFalse(os.path.exists(temp_dir))
+
+    def test_terminal_rejects_unapproved_scope_and_requires_aws_login(self):
+        with self.assertRaises(KubernetesReadError) as error:
+            start_pod_terminal("prod", "kube-system", "api-0", "api")
+        self.assertEqual(error.exception.status_code, 400)
+
+        with patch("backend.services.kubernetes_service.credential_status", return_value={"authenticated": False}), \
+                patch("backend.services.kubernetes_service.subprocess.Popen") as popen:
+            with self.assertRaises(KubernetesReadError) as error:
+                start_pod_terminal("prod", self.backend_namespace, "api-0", "api")
+
+        self.assertEqual(error.exception.status_code, 401)
+        popen.assert_not_called()
+
     def test_namespace_and_log_inputs_fail_closed(self):
         with self.assertRaises(KubernetesReadError):
             list_pods("prod", "kube-system")
@@ -253,7 +320,7 @@ class KubernetesServiceTests(unittest.TestCase):
         with self.assertRaises(KubernetesReadError):
             credential_status("staging")
         with self.assertRaises(KubernetesReadError):
-            list_pods("dev", "all")
+            list_pods("staging", "all")
 
 
 if __name__ == "__main__":

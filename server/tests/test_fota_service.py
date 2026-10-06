@@ -8,6 +8,7 @@ from backend.services.fota_service import (
     FotaReadError,
     get_package,
     get_filter_metadata,
+    get_model_matrix,
     list_campaigns,
     list_launched_campaigns_by_vendor,
     list_packages,
@@ -46,17 +47,23 @@ class FotaReadServiceTests(unittest.TestCase):
             page=2,
             size=10,
             beta=False,
-            filters={"vendor": "ChargeDot", "isPushable": False, "approvalStatus": "TESTED"},
+            filters={
+                "vendor": "ChargeDot",
+                "isPushable": False,
+                "approvalStatus": "TESTED",
+                "unassignedCampaign": True,
+            },
         )
 
         request = urlopen.call_args.args[0]
         self.assertEqual(request.get_method(), "GET")
-        self.assertEqual(urlparse(request.full_url).path, "/v2/fota-management/v2/firmware")
+        self.assertEqual(urlparse(request.full_url).path, "/v1/firmware")
+        self.assertEqual(request.get_header("Clientid"), "ctp")
         self.assertEqual(
             parse_qs(urlparse(request.full_url).query),
             {
                 "page": ["2"], "size": ["10"], "beta": ["false"], "vendor": ["ChargeDot"],
-                "isPushable": ["false"], "approvalStatus": ["TESTED"],
+                "isPushable": ["false"], "approvalStatus": ["TESTED"], "unassignedCampaign": ["true"],
             },
         )
 
@@ -70,6 +77,7 @@ class FotaReadServiceTests(unittest.TestCase):
         self.assertEqual(request.get_method(), "GET")
         self.assertEqual(urlparse(request.full_url).path, "/v1/campaign")
         self.assertEqual(parse_qs(urlparse(request.full_url).query), {"page": ["0"], "size": ["5"], "beta": ["false"]})
+        self.assertEqual(request.get_header("Clientid"), "ctp")
 
     @patch("backend.services.fota_service.urlopen")
     def test_compleo_launched_campaigns_use_vendor_query(self, urlopen):
@@ -109,13 +117,17 @@ class FotaReadServiceTests(unittest.TestCase):
         request = urlopen.call_args.args[0]
         self.assertEqual(request.get_method(), "GET")
         self.assertTrue(request.full_url.endswith("/v1/firmware/3.3.3/Terra%20AC/false"))
-        self.assertIsNone(request.get_header("Clientid"))
+        self.assertEqual(request.get_header("Clientid"), "ctp")
 
     @patch("backend.services.fota_service.urlopen")
-    def test_prev_fota_origin_fails_closed_without_network(self, urlopen):
-        with self.assertRaisesRegex(FotaReadError, "not configured"):
-            list_packages("prev", "synthetic-test-token")
-        urlopen.assert_not_called()
+    def test_prev_fota_origin_is_configured_for_reads(self, urlopen):
+        urlopen.return_value = mock_response({"data": {"content": [], "totalElements": 0}})
+
+        list_packages("prev", "synthetic-test-token")
+
+        request = urlopen.call_args.args[0]
+        self.assertEqual(urlparse(request.full_url).path, "/v1/firmware")
+        self.assertEqual(request.get_header("Origin"), "https://tme-ev-chargingplatform-fota-webapp-prev.toyota-europe.com")
 
     @patch("backend.services.fota_service.urlopen")
     def test_filter_metadata_uses_observed_tme_client_header(self, urlopen):
@@ -125,10 +137,29 @@ class FotaReadServiceTests(unittest.TestCase):
 
         self.assertEqual(set(metadata), {"models", "versions", "statuses", "countries"})
         self.assertEqual(urlopen.call_count, 4)
+        headers_by_path = {}
         for call in urlopen.call_args_list:
             request = call.args[0]
             self.assertEqual(request.get_method(), "GET")
-            self.assertEqual(request.get_header("Clientid"), "tme")
+            headers_by_path[urlparse(request.full_url).path] = request.get_header("Clientid")
+
+        self.assertEqual(headers_by_path, {
+            "/v1/wallboxes/models": "tme",
+            "/v1/firmwares/version": "tme",
+            "/v1/wallboxes/connectors/0/status": "tme",
+            "/v1/fota/countries": "ctp",
+        })
+
+    @patch("backend.services.fota_service.urlopen")
+    def test_model_matrix_uses_observed_ctp_client_header(self, urlopen):
+        urlopen.return_value = mock_response({"data": {"content": [], "totalElements": 0}})
+
+        get_model_matrix("acc", "synthetic-test-token")
+
+        request = urlopen.call_args.args[0]
+        self.assertEqual(request.get_method(), "GET")
+        self.assertEqual(urlparse(request.full_url).path, "/v1/wallboxes/model")
+        self.assertEqual(request.get_header("Clientid"), "ctp")
 
 
 if __name__ == "__main__":

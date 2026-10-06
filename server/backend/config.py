@@ -31,8 +31,9 @@ ENV_CONFIGS = {
 FOTA_WEBAPP_ORIGINS = {
     "prod": "https://tme-ev-chargingplatform-fota-webapp.toyota-europe.com",
     "acc": "https://tme-ev-chargingplatform-fota-webapp-acc.toyota-europe.com",
+    "prev": "https://tme-ev-chargingplatform-fota-webapp-prev.toyota-europe.com",
 }
-FOTA_WEBAPP_PATH = "/wallbox/listfo"
+FOTA_WEBAPP_PATH = "/campaign/registry"
 
 TME_API_ORIGIN = ENV_CONFIGS["prod"]["api_host"]
 

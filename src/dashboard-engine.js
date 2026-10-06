@@ -149,6 +149,25 @@ const state = {
   },
 };
 
+const KUBERNETES_NAMESPACE_OPTIONS = {
+  prod: [
+    ['tme-ns-ev-backend-prd', 'Backend · production'],
+    ['tme-ns-ev-virtual-gateway-prd', 'Virtual gateway · production'],
+  ],
+  acc: [
+    ['tme-ns-ev-backend-uat', 'Backend · ACC'],
+    ['tme-ns-ev-virtual-gateway-uat', 'Virtual gateway · ACC'],
+  ],
+  prev: [
+    ['tme-ns-ev-backend-prev', 'Backend · PREV'],
+    ['tme-ns-ev-virtual-gateway-prev', 'Virtual gateway · PREV'],
+  ],
+  dev: [
+    ['tme-ns-ev-backend-dev', 'Backend · DEV'],
+    ['tme-ns-ev-virtual-gateway-dev', 'Virtual gateway · DEV'],
+  ],
+};
+
 const typeColors = {
   CHARGER_CONFIGURATION: '#8b5cf6',
   CHARGING_SESSION_DATA: '#06b6d4',
@@ -9085,9 +9104,16 @@ async function retryLoginFromScratch() {
   });
 
   const app = currentTokenApp();
-  setStatus(`Opening a fresh ${envUpper} ${app.toUpperCase()} sign-in tab in your browser...`, 'warning');
+  const isFota = app === 'fota';
+  setStatus(
+    isFota
+      ? `Checking for an existing ${envUpper} FOTA sign-in in your browser...`
+      : `Opening a fresh ${envUpper} ${app.toUpperCase()} sign-in tab in your browser...`,
+    'warning',
+  );
   try {
-    const params = new URLSearchParams({ force: 'true', env, app });
+    const params = new URLSearchParams({ env, app });
+    if (!isFota) params.set('force', 'true');
     const res = await fetch(dashboardApiUrl(`/api/refresh-tme-token?${params.toString()}`), { method: 'POST' });
     const data = await res.json();
     if (!data?.ok) {
@@ -9107,7 +9133,10 @@ async function retryLoginFromScratch() {
     return;
   }
 
-  const tokenLoaded = await waitForAutoToken(390000, { environment: env, differentFrom: tokenBeforeRefresh });
+  const tokenLoaded = await waitForAutoToken(390000, {
+    environment: env,
+    differentFrom: isFota ? '' : tokenBeforeRefresh,
+  });
   if (refreshBtn) refreshBtn.classList.remove('rotating');
   if (refreshIcon) refreshIcon.style.animation = '';
 
@@ -9347,6 +9376,7 @@ function openKubernetesPodsView() {
   title.textContent = 'Observability';
   title.hidden = false;
   document.querySelector('.topbar')?.setAttribute('data-view', 'kubernetes');
+  updateKubernetesEnvironmentControls();
   document.getElementById('kubernetesNamespaceSelect').value = state.kubernetes.namespace;
   document.getElementById('kubernetesTimeRange').value = state.kubernetes.timeRange;
   try {
@@ -9364,6 +9394,42 @@ function openKubernetesPodsView() {
   updateFloatingTimeToolbar();
 }
 
+function updateKubernetesEnvironmentControls() {
+  const env = state.kubernetes.env;
+  const environmentSelect = document.getElementById('kubernetesEnvironmentSelect');
+  const namespaceSelect = document.getElementById('kubernetesNamespaceSelect');
+  const environmentLabel = { prod: 'Production', acc: 'ACC', prev: 'PREV', dev: 'DEV' }[env];
+  environmentSelect.value = env;
+  namespaceSelect.innerHTML = `<option value="all">All ${environmentLabel} namespaces</option>${KUBERNETES_NAMESPACE_OPTIONS[env]
+    .map(([namespace, label]) => `<option value="${namespace}">${label} · ${namespace}</option>`)
+    .join('')}`;
+  document.getElementById('kubernetesEnvironmentHeading').textContent = `${environmentLabel} services`;
+  document.getElementById('kubernetesEnvironmentDescription').textContent = `Live signals from the approved ${environmentLabel} namespaces.`;
+  document.getElementById('kubernetesTerminalEnvironment').textContent = `Interactive shell through the ${env.toUpperCase()} EKS profile`;
+  document.getElementById('kubernetesRefreshBtn').setAttribute('aria-label', `Refresh ${env.toUpperCase()} pod data`);
+  document.getElementById('kubernetesRefreshBtn').title = `Refresh ${env.toUpperCase()} pod data`;
+  document.getElementById('kubernetesSummaryGrid').setAttribute('aria-label', `${environmentLabel} service health`);
+  document.getElementById('kubernetesOperationalTimeline').setAttribute('aria-label', `Unified ${environmentLabel} operations timeline`);
+}
+
+function changeKubernetesEnvironment(env) {
+  if (!Object.hasOwn(KUBERNETES_NAMESPACE_OPTIONS, env) || env === state.kubernetes.env) return;
+  closeKubernetesTerminal('Session stopped after changing environment.');
+  state.kubernetes.env = env;
+  state.kubernetes.auth = 'idle';
+  state.kubernetes.error = '';
+  state.kubernetes.authRequestId += 1;
+  if (state.kubernetes.authPollTimer) {
+    window.clearInterval(state.kubernetes.authPollTimer);
+    state.kubernetes.authPollTimer = null;
+  }
+  updateKubernetesEnvironmentControls();
+  const namespaceSelect = document.getElementById('kubernetesNamespaceSelect');
+  namespaceSelect.value = 'all';
+  namespaceSelect.dispatchEvent(new Event('change'));
+  void checkKubernetesCredentials();
+}
+
 function renderKubernetesAuth() {
   const panel = document.getElementById('kubernetesAuthPanel');
   const dataView = document.getElementById('kubernetesDataView');
@@ -9375,8 +9441,8 @@ function renderKubernetesAuth() {
   const auth = state.kubernetes.auth;
   const env = state.kubernetes.env.toUpperCase();
   const authCopy = {
-    checking: ['Checking AWS access', `Verifying the read-only profile for ${env}.`],
-    'login-required': ['AWS sign-in required', `Sign in with the ${env} read-only AWS profile to inspect this cluster.`],
+    checking: ['Checking AWS access', `Verifying the configured AWS profile for ${env}.`],
+    'login-required': ['AWS sign-in required', `Sign in with the configured ${env} AWS profile to inspect this cluster.`],
     authenticating: ['Complete AWS sign-in', 'Finish the sign-in in the browser window opened by AWS CLI. This view will detect the session automatically.'],
     'cli-missing': ['AWS CLI unavailable', 'Install and configure AWS CLI v2 with the provided EKS read-only profile, then reopen this view.'],
     'identity-error': ['Could not verify AWS access', 'The profile returned an unexpected identity response. Retry the check or open the AWS access portal.'],
@@ -10054,9 +10120,98 @@ function renderKubernetesTimeline(data, selectedPodKey = 'all', targetId = 'kube
   }
 }
 
+let kubernetesTerminalSocket = null;
+let kubernetesTerminalPodKey = '';
+
+function closeKubernetesTerminal(message = 'Session stopped.') {
+  const socket = kubernetesTerminalSocket;
+  kubernetesTerminalSocket = null;
+  kubernetesTerminalPodKey = '';
+  if (socket && socket.readyState < WebSocket.CLOSING) socket.close();
+  document.getElementById('kubernetesTerminalStatus').textContent = message;
+  document.getElementById('kubernetesTerminalStart').disabled = false;
+  document.getElementById('kubernetesTerminalStop').disabled = true;
+  document.getElementById('kubernetesTerminalContainer').disabled = false;
+  document.getElementById('kubernetesTerminalInput').disabled = true;
+  document.getElementById('kubernetesTerminalSend').disabled = true;
+}
+
+function startKubernetesTerminal() {
+  const pod = state.kubernetes.activePod;
+  const container = document.getElementById('kubernetesTerminalContainer').value;
+  if (!pod || !container || kubernetesTerminalSocket) return;
+  const output = document.getElementById('kubernetesTerminalOutput');
+  const status = document.getElementById('kubernetesTerminalStatus');
+  const startButton = document.getElementById('kubernetesTerminalStart');
+  const stopButton = document.getElementById('kubernetesTerminalStop');
+  const input = document.getElementById('kubernetesTerminalInput');
+  const sendButton = document.getElementById('kubernetesTerminalSend');
+  document.getElementById('kubernetesTerminalContainer').disabled = true;
+  const params = new URLSearchParams({ env: state.kubernetes.env, namespace: pod.namespace, pod: pod.name, container });
+  const socketUrl = new URL(`/api/kubernetes/terminal?${params}`, window.location.href);
+  socketUrl.protocol = socketUrl.protocol === 'https:' ? 'wss:' : 'ws:';
+  status.textContent = 'Connecting...';
+  output.textContent = '';
+  startButton.disabled = true;
+  stopButton.disabled = false;
+  try {
+    const socket = new WebSocket(socketUrl);
+    kubernetesTerminalSocket = socket;
+    kubernetesTerminalPodKey = `${pod.namespace}/${pod.name}`;
+    socket.addEventListener('open', () => {
+      if (kubernetesTerminalSocket !== socket) return;
+      status.textContent = `${pod.name} · ${container}`;
+      input.disabled = false;
+      sendButton.disabled = false;
+      input.focus();
+    });
+    socket.addEventListener('message', (event) => {
+      if (typeof event.data !== 'string') return;
+      output.textContent = `${output.textContent}${event.data}`.slice(-200000);
+      output.scrollTop = output.scrollHeight;
+    });
+    socket.addEventListener('error', () => {
+      if (kubernetesTerminalSocket === socket) status.textContent = 'Connection failed';
+    });
+    socket.addEventListener('close', () => {
+      if (kubernetesTerminalSocket !== socket) return;
+      kubernetesTerminalSocket = null;
+      kubernetesTerminalPodKey = '';
+      status.textContent = 'Session ended';
+      startButton.disabled = false;
+      stopButton.disabled = true;
+      input.disabled = true;
+      sendButton.disabled = true;
+      document.getElementById('kubernetesTerminalContainer').disabled = false;
+    });
+  } catch (error) {
+    kubernetesTerminalSocket = null;
+    kubernetesTerminalPodKey = '';
+    status.textContent = 'Unable to open a terminal connection';
+    startButton.disabled = false;
+    stopButton.disabled = true;
+    document.getElementById('kubernetesTerminalContainer').disabled = false;
+  }
+}
+
+function sendKubernetesTerminalInput(event) {
+  event.preventDefault();
+  const socket = kubernetesTerminalSocket;
+  const input = document.getElementById('kubernetesTerminalInput');
+  if (!socket || socket.readyState !== WebSocket.OPEN || !input.value) return;
+  if (input.value.length > 60000) {
+    document.getElementById('kubernetesTerminalStatus').textContent = 'Input is too large';
+    return;
+  }
+  socket.send(`${input.value}\n`);
+  input.value = '';
+}
+
 function openKubernetesPodDetail(pod) {
   const data = state.kubernetes.result;
   const dialog = document.getElementById('kubernetesPodDetailDialog');
+  const podKey = `${pod.namespace}/${pod.name}`;
+  if (kubernetesTerminalPodKey && kubernetesTerminalPodKey !== podKey) closeKubernetesTerminal('Session stopped after changing pods.');
   cancelKubernetesLogRequest();
   window.clearInterval(state.kubernetes.logTimer);
   state.kubernetes.logTimer = null;
@@ -10120,6 +10275,15 @@ function openKubernetesPodDetail(pod) {
   document.getElementById('kubernetesPodDetailMetadata').innerHTML = `<div class="kubernetes-detail-line"><strong>Owner</strong><span>${escapeHtml(ownerText)}</span></div><div class="kubernetes-label-list">${labels || '<span class="kubernetes-chart-empty">No labels reported.</span>'}</div>`;
   const containerSelect = document.getElementById('kubernetesLogContainer');
   containerSelect.innerHTML = `<option value="">All containers</option>${containers.map((container) => `<option value="${escapeHtml(container.name)}">${escapeHtml(container.name)}${container.kind === 'init' ? ' · init' : ''}</option>`).join('')}`;
+  const terminalContainers = containers.filter((container) => container.kind !== 'init' && container.state === 'running');
+  const terminalSelect = document.getElementById('kubernetesTerminalContainer');
+  terminalSelect.innerHTML = terminalContainers.map((container) => `<option value="${escapeHtml(container.name)}">${escapeHtml(container.name)}</option>`).join('');
+  terminalSelect.disabled = terminalContainers.length === 0 || Boolean(kubernetesTerminalSocket);
+  document.getElementById('kubernetesTerminalStart').disabled = terminalContainers.length === 0 || Boolean(kubernetesTerminalSocket);
+  if (!kubernetesTerminalSocket) {
+    document.getElementById('kubernetesTerminalOutput').textContent = 'Start a shell to run a command in this container.';
+    document.getElementById('kubernetesTerminalStatus').textContent = terminalContainers.length ? 'Session stopped' : 'No running application container';
+  }
   document.getElementById('kubernetesLogInstance').value = 'current';
   document.getElementById('kubernetesLogsLiveToggle').setAttribute('aria-pressed', 'false');
   document.getElementById('kubernetesLogsLiveToggle').textContent = 'Start live';
@@ -11893,6 +12057,7 @@ function initializeSharedTopbar({ fotaOnly = false } = {}) {
   });
 
   document.getElementById('kubernetesNamespaceSelect')?.addEventListener('change', (event) => {
+    closeKubernetesTerminal('Session stopped after changing namespace.');
     state.kubernetes.namespace = event.target.value;
     state.kubernetes.requestId += 1;
     state.kubernetes.inventoryLoading = false;
@@ -11915,6 +12080,9 @@ function initializeSharedTopbar({ fotaOnly = false } = {}) {
     document.getElementById('kubernetesErrorMessage').hidden = true;
     renderKubernetesAuth();
     if (state.kubernetes.auth === 'ready') void fetchKubernetesPods();
+  });
+  document.getElementById('kubernetesEnvironmentSelect')?.addEventListener('change', (event) => {
+    changeKubernetesEnvironment(event.target.value);
   });
   document.getElementById('kubernetesTimeRange')?.addEventListener('change', (event) => {
     state.kubernetes.timeRange = event.target.value;
@@ -11939,6 +12107,7 @@ function initializeSharedTopbar({ fotaOnly = false } = {}) {
     if (!tile) return;
     const nextKey = tile.dataset.serviceKey;
     if (nextKey !== state.kubernetes.activeServiceKey) {
+      closeKubernetesTerminal('Session stopped after changing service.');
       window.clearInterval(state.kubernetes.logTimer);
       state.kubernetes.logTimer = null;
       cancelKubernetesLogRequest();
@@ -11991,6 +12160,7 @@ function initializeSharedTopbar({ fotaOnly = false } = {}) {
     document.getElementById('kubernetesPodDetailDialog')?.close();
   });
   document.getElementById('kubernetesPodDetailDialog')?.addEventListener('close', () => {
+    closeKubernetesTerminal();
     state.kubernetes.activePod = null;
     cancelKubernetesLogRequest();
     window.clearInterval(state.kubernetes.logTimer);
@@ -12015,6 +12185,12 @@ function initializeSharedTopbar({ fotaOnly = false } = {}) {
   document.getElementById('kubernetesServiceLogsRefresh')?.addEventListener('click', () => void fetchKubernetesLogs());
   document.getElementById('kubernetesLogsLiveToggle')?.addEventListener('click', (event) => toggleKubernetesLogPolling(event.currentTarget, false));
   document.getElementById('kubernetesServiceLogsLiveToggle')?.addEventListener('click', (event) => toggleKubernetesLogPolling(event.currentTarget, true));
+  document.getElementById('kubernetesTerminalStart')?.addEventListener('click', startKubernetesTerminal);
+  document.getElementById('kubernetesTerminalStop')?.addEventListener('click', () => closeKubernetesTerminal());
+  document.getElementById('kubernetesTerminalForm')?.addEventListener('submit', sendKubernetesTerminalInput);
+  document.getElementById('kubernetesTerminalInput')?.addEventListener('keydown', (event) => {
+    if (event.key === 'Enter' && !event.shiftKey && !event.isComposing) sendKubernetesTerminalInput(event);
+  });
 
   document.getElementById('globalTokenRefresh')?.addEventListener('click', async (event) => {
     event.stopPropagation();

@@ -95,8 +95,8 @@ def log(message):
         pass
 
 
-def is_tme_token(token):
-    return is_backend_tme_token(token, env=ENV)
+def is_tme_token(token, env=ENV, app=APP):
+    return is_backend_tme_token(token, env=env, app=app)
 
 
 def pick_valid_tme_token(candidates, min_iat=MIN_ISSUED_AT):
@@ -118,7 +118,7 @@ def pick_valid_tme_token(candidates, min_iat=MIN_ISSUED_AT):
     for token in seen:
         if is_token_expired(token):
             continue
-        if is_tme_token(token):
+        if is_tme_token(token, env=ENV, app=APP):
             payload = decode_jwt_payload(token) or {}
             issued_at = payload.get("iat")
             if min_iat and (not isinstance(issued_at, (int, float)) or issued_at < min_iat):
@@ -544,31 +544,22 @@ def poll_for_token(context, browser):
     return 1
 
 
-def is_dashboard_id_token(token, min_iat=0):
-    if is_token_expired(token) or not is_tme_token(token):
+def is_app_token(token, min_iat=0):
+    if is_token_expired(token) or not is_tme_token(token, env=ENV, app=APP):
         return False
     payload = decode_jwt_payload(token) or {}
-    aud = payload.get("aud")
-    if isinstance(aud, str):
-        audiences = {aud}
-    elif isinstance(aud, list) and all(isinstance(value, str) for value in aud):
-        audiences = set(aud)
-    else:
-        return False
-    if not (audiences & TME_CLIENT_IDS):
-        return False
     issued_at = payload.get("iat")
     if min_iat and (not isinstance(issued_at, (int, float)) or issued_at < min_iat):
         return False
     return True
 
 
-def pick_dashboard_token(candidates, min_iat=0):
+def pick_app_token(candidates, min_iat=0):
     best = None
     best_exp = -1
     seen = set()
     for token in candidates or []:
-        if not token or token in seen or not is_dashboard_id_token(token, min_iat=min_iat):
+        if not token or token in seen or not is_app_token(token, min_iat=min_iat):
             continue
         seen.add(token)
         exp = (decode_jwt_payload(token) or {}).get("exp") or 0
@@ -706,7 +697,7 @@ def storage_dirs():
                     yield storage
 
 
-def find_dashboard_token(include_ldb=False, min_iat=0):
+def find_browser_token(include_ldb=False, min_iat=0):
     suffixes = (".log", ".ldb") if include_ldb else (".log",)
     candidates = []
     for directory in storage_dirs():
@@ -718,7 +709,7 @@ def find_dashboard_token(include_ldb=False, min_iat=0):
             if not name.endswith(suffixes):
                 continue
             candidates.extend(extract_jwts(read_shared(os.path.join(directory, name))))
-    return pick_dashboard_token(candidates, min_iat=min_iat)
+    return pick_app_token(candidates, min_iat=min_iat)
 
 
 def chrome_executable():
@@ -750,13 +741,13 @@ def open_tme_tab(new=2):
 
 
 def run_external_browser_capture():
-    log(f"Looking for a TME session token for {ENV.upper()} in browser storage.")
+    log(f"Looking for a TME {APP.upper()} session token for {ENV.upper()} in browser storage.")
     opened_tab = False
     open_attempted = False
     page_retry_attempted = False
 
     for attempt in range(1, 181):
-        token = find_dashboard_token(include_ldb=True, min_iat=MIN_ISSUED_AT)
+        token = find_browser_token(include_ldb=True, min_iat=MIN_ISSUED_AT)
         if token:
             try:
                 status, response_body = save_token_to_local_server(token)

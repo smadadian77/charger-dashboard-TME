@@ -7,12 +7,13 @@ from types import SimpleNamespace
 from unittest.mock import call, patch
 
 import tme_token_bridge as bridge
+from backend.auth import FOTA_CLIENT_IDS
 from tme_token_bridge import (
     TME_CLIENT_IDS,
     extract_jwts,
     extract_utf16_jwts,
     _stale_profile_process_query,
-    pick_dashboard_token,
+    pick_app_token,
     pick_valid_tme_token,
 )
 
@@ -29,6 +30,14 @@ def synthetic_tme_jwt(issued_at):
         return base64.urlsafe_b64encode(json.dumps(value).encode()).decode().rstrip("=")
 
     payload = {"aud": next(iter(TME_CLIENT_IDS)), "iat": issued_at, "exp": issued_at + 3600}
+    return f"{encode({'alg': 'none', 'typ': 'JWT'})}.{encode(payload)}.synthetic_signature"
+
+
+def synthetic_fota_jwt(issued_at):
+    def encode(value):
+        return base64.urlsafe_b64encode(json.dumps(value).encode()).decode().rstrip("=")
+
+    payload = {"aud": next(iter(FOTA_CLIENT_IDS[bridge.ENV])), "iat": issued_at, "exp": issued_at + 3600}
     return f"{encode({'alg': 'none', 'typ': 'JWT'})}.{encode(payload)}.synthetic_signature"
 
 
@@ -49,10 +58,19 @@ class TokenBridgeExtractionTests(unittest.TestCase):
         old_token = synthetic_tme_jwt(threshold - 60)
         fresh_token = synthetic_tme_jwt(threshold + 1)
 
-        self.assertEqual(pick_dashboard_token([old_token, fresh_token], min_iat=threshold), fresh_token)
+        self.assertEqual(pick_app_token([old_token, fresh_token], min_iat=threshold), fresh_token)
         self.assertEqual(pick_valid_tme_token([old_token, fresh_token], min_iat=threshold), fresh_token)
-        self.assertIsNone(pick_dashboard_token([old_token], min_iat=threshold))
+        self.assertIsNone(pick_app_token([old_token], min_iat=threshold))
         self.assertIsNone(pick_valid_tme_token([old_token], min_iat=threshold))
+
+    def test_fota_picker_accepts_only_the_fota_application_audience(self):
+        issued_at = 1_900_000_000
+        fota_token = synthetic_fota_jwt(issued_at)
+        dashboard_token = synthetic_tme_jwt(issued_at)
+
+        with patch.object(bridge, "APP", "fota"):
+            self.assertEqual(pick_valid_tme_token([fota_token]), fota_token)
+            self.assertIsNone(pick_valid_tme_token([dashboard_token]))
 
     def test_force_refresh_disk_scan_propagates_min_iat(self):
         threshold = 1_900_000_000
@@ -65,7 +83,7 @@ class TokenBridgeExtractionTests(unittest.TestCase):
                 handle.write(b"synthetic")
             with patch.object(bridge, "storage_dirs", return_value=[directory]), \
                     patch.object(bridge, "read_shared", return_value=raw_storage):
-                captured = bridge.find_dashboard_token(include_ldb=True, min_iat=threshold)
+                captured = bridge.find_browser_token(include_ldb=True, min_iat=threshold)
 
         self.assertEqual(captured, fresh_token)
 
@@ -108,7 +126,7 @@ class TokenBridgeExtractionTests(unittest.TestCase):
 
         with patch.object(bridge, "FORCE", True), \
                 patch.object(bridge, "NO_BROWSER", True), \
-                patch.object(bridge, "find_dashboard_token", return_value=None), \
+                patch.object(bridge, "find_browser_token", return_value=None), \
                 patch.object(bridge, "open_tme_tab") as open_tab, \
                 patch.object(bridge, "log"), \
                 patch.object(bridge.time, "sleep", side_effect=StopPolling):
@@ -125,11 +143,25 @@ class TokenBridgeExtractionTests(unittest.TestCase):
         external_capture.assert_called_once_with()
         playwright_capture.assert_not_called()
 
+    def test_fota_capture_scans_browser_storage_then_opens_a_tab_in_the_default_browser(self):
+        with patch.object(bridge, "APP", "fota"), \
+                patch.object(bridge, "NO_BROWSER", False), \
+                patch.object(bridge, "find_browser_token", return_value=None) as scan_browser, \
+                patch.object(bridge, "open_tme_tab", return_value=True) as open_tab, \
+                patch.object(bridge, "run_playwright_capture") as playwright_capture, \
+                patch.object(bridge.time, "sleep", side_effect=InterruptedError):
+            with self.assertRaises(InterruptedError):
+                bridge.run_external_browser_capture()
+
+        scan_browser.assert_called_once_with(include_ldb=True, min_iat=bridge.MIN_ISSUED_AT)
+        open_tab.assert_called_once_with()
+        playwright_capture.assert_not_called()
+
     def test_existing_live_token_is_checked_before_opening_new_tab(self):
         token = synthetic_tme_jwt(1_900_000_000)
         with patch.object(bridge, "NO_BROWSER", False), \
                 patch.object(bridge, "FORCE", True), \
-                patch.object(bridge, "find_dashboard_token", return_value=token), \
+                patch.object(bridge, "find_browser_token", return_value=token), \
                 patch.object(bridge, "save_token_to_local_server", return_value=(200, "{\"ok\":true}")), \
                 patch.object(bridge, "open_tme_tab") as open_tab:
             self.assertEqual(bridge.run_external_browser_capture(), 0)
@@ -142,17 +174,19 @@ class TokenBridgeExtractionTests(unittest.TestCase):
 
         open_url.assert_called_once_with(bridge.TME_URL, new=2)
 
-    def test_fota_page_gets_one_same_window_retry_when_token_is_not_found(self):
-        token = synthetic_tme_jwt(1_900_000_000)
+    def test_fota_browser_scan_accepts_fota_token_and_rejects_dashboard_token(self):
+        issued_at = 1_900_000_000
+        fota_token = synthetic_fota_jwt(issued_at)
+        dashboard_token = synthetic_tme_jwt(issued_at)
         with patch.object(bridge, "APP", "fota"), \
-                patch.object(bridge, "NO_BROWSER", False), \
-                patch.object(bridge, "find_dashboard_token", side_effect=[None] * 10 + [token]), \
-                patch.object(bridge, "open_tme_tab", side_effect=[True, True]) as open_tab, \
-                patch.object(bridge, "save_token_to_local_server", return_value=(200, "{\"ok\":true}")), \
-                patch.object(bridge.time, "sleep"):
+                patch.object(bridge, "find_browser_token", return_value=fota_token) as scan_browser, \
+                patch.object(bridge, "save_token_to_local_server", return_value=(200, '{"ok":true}')) as save_token:
             self.assertEqual(bridge.run_external_browser_capture(), 0)
 
-        self.assertEqual(open_tab.call_args_list, [call(), call(new=0)])
+        scan_browser.assert_called_once_with(include_ldb=True, min_iat=bridge.MIN_ISSUED_AT)
+        save_token.assert_called_once_with(fota_token)
+        with patch.object(bridge, "APP", "fota"):
+            self.assertIsNone(bridge.pick_app_token([dashboard_token]))
 
     def test_stale_process_query_is_scoped_to_the_environment_profile(self):
         profile_root = r"C:\Local App Data\TMEWallboxBridge_ACC"

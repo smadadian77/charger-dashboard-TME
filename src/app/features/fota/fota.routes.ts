@@ -5,7 +5,11 @@ export const FOTA_ROUTES: Routes = [
     path: '',
     loadComponent: () => import('./fota-shell.component').then((module) => module.FotaShellComponent),
     children: [
-      { path: '', pathMatch: 'full', redirectTo: 'packages' },
+      { path: '', pathMatch: 'full', redirectTo: 'campaigns' },
+      {
+        path: 'matrix',
+        loadComponent: () => import('./fota-model-matrix-page.component').then((module) => module.FotaModelMatrixPageComponent)
+      },
       {
         path: 'packages',
         data: { beta: false },

@@ -72,6 +72,7 @@ export interface FotaPackageFilters {
   version?: string;
   isPushable?: boolean;
   approvalStatus?: string;
+  unassignedCampaign?: boolean;
 }
 
 export interface FotaWallboxFilters {
@@ -107,4 +108,11 @@ export interface FotaMutationResponse {
   status?: number;
   response?: unknown;
   message?: string;
+}
+
+export interface FotaModelMatrixRow {
+  modelName: string;
+  hardwareVersion: string;
+  vendor?: string | null;
+  versionBinMap: Record<string, string>;
 }

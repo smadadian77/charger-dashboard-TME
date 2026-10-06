@@ -1,4 +1,6 @@
+import base64
 import json
+import socket
 import threading
 import unittest
 from io import BytesIO
@@ -149,6 +151,26 @@ class TokenRouteTests(unittest.TestCase):
         get_pods.assert_called_once_with("prod", "all")
         self.assertEqual([call.args for call in get_infrastructure.call_args_list], [("prod", "all", False), ("prod", "all", True)])
 
+    def test_kubernetes_routes_forward_each_selected_nonproduction_environment(self):
+        environments = ("dev", "prev", "acc")
+        with patch("server.get_kubernetes_credential_status", side_effect=lambda env: {
+            "env": env, "authenticated": True, "status": "ready"
+        }) as get_status, patch("server.list_kubernetes_pods", side_effect=lambda env, namespace: {
+            "env": env, "namespace": namespace, "pods": []
+        }) as get_pods:
+            for env in environments:
+                status_code, status_payload = self.request_json("GET", f"/api/kubernetes/status?env={env}")
+                pods_code, pods_payload = self.request_json(
+                    "GET", f"/api/kubernetes/pods?env={env}&namespace=all"
+                )
+                self.assertEqual(status_code, 200)
+                self.assertEqual(status_payload["env"], env)
+                self.assertEqual(pods_code, 200)
+                self.assertEqual(pods_payload["env"], env)
+
+        self.assertEqual([call.args[0] for call in get_status.call_args_list], list(environments))
+        self.assertEqual([call.args for call in get_pods.call_args_list], [(env, "all") for env in environments])
+
     def test_kubernetes_routes_reject_remote_origins_before_aws_access(self):
         with patch("server.get_kubernetes_credential_status") as get_status, \
                 patch("server.list_kubernetes_pods") as get_pods, \
@@ -172,6 +194,53 @@ class TokenRouteTests(unittest.TestCase):
         get_pods.assert_not_called()
         get_infrastructure.assert_not_called()
         start_login.assert_not_called()
+
+    def test_kubernetes_terminal_requires_local_origin_and_websocket_upgrade(self):
+        path = "/api/kubernetes/terminal?env=prod&namespace=tme-ns-ev-backend-prd&pod=api-0&container=api"
+        with patch("server.start_kubernetes_pod_terminal") as start_terminal:
+            remote_status, _ = self.request_json("GET", path, origin="https://attacker.example")
+            invalid_upgrade_status, _ = self.request_json("GET", path)
+
+        self.assertEqual(remote_status, 403)
+        self.assertEqual(invalid_upgrade_status, 400)
+        start_terminal.assert_not_called()
+
+    def test_kubernetes_terminal_upgrades_and_closes_the_session(self):
+        path = "/api/kubernetes/terminal?env=prod&namespace=tme-ns-ev-backend-prd&pod=api-0&container=api"
+        session = unittest.mock.MagicMock()
+        session.process.stdout = BytesIO(b"shell ready\n")
+        session.process.stdin = BytesIO()
+        session.process.poll.return_value = None
+        closed = threading.Event()
+        session.close.side_effect = closed.set
+        websocket_key = base64.b64encode(b"0123456789abcdef").decode("ascii")
+        with patch("server.start_kubernetes_pod_terminal", return_value=session) as start_terminal:
+            client = socket.create_connection(("127.0.0.1", self.httpd.server_port), timeout=3)
+            client.sendall((
+                f"GET {path} HTTP/1.1\r\n"
+                f"Host: localhost:{self.httpd.server_port}\r\n"
+                "Origin: http://localhost:4200\r\n"
+                "Connection: Upgrade\r\n"
+                "Upgrade: websocket\r\n"
+                "Sec-WebSocket-Version: 13\r\n"
+                f"Sec-WebSocket-Key: {websocket_key}\r\n\r\n"
+            ).encode("ascii"))
+            response = client.recv(1024)
+            self.assertIn(b"101 Switching Protocols", response)
+            mask = b"abcd"
+            close_payload = b"\x03\xe8"
+            masked_close = bytes((0x88, 0x80 | len(close_payload))) + mask + bytes(
+                value ^ mask[index % 4] for index, value in enumerate(close_payload)
+            )
+            client.sendall(masked_close)
+            client.close()
+
+            self.assertTrue(closed.wait(timeout=3))
+
+        start_terminal.assert_called_once_with(
+            "prod", "tme-ns-ev-backend-prd", "api-0", "api"
+        )
+        session.close.assert_called_once()
 
     def test_kubernetes_login_starts_sso_for_the_selected_environment(self):
         with patch("server.start_kubernetes_sso_login", return_value={
@@ -286,19 +355,21 @@ class TokenRouteTests(unittest.TestCase):
         self.assertNotIn("token", payload)
         store_token.assert_called_once_with(body["token"], "acc", min_issued_at=0, app="charger")
 
-    def test_fota_capture_uses_fota_url_store_and_freshness_boundary(self):
-        with patch("server.read_saved_token", return_value=""), \
+    def test_fota_capture_scans_existing_browser_sessions_without_forcing_fresh_login(self):
+        with patch("server.read_saved_token", return_value="") as read_token, \
                 patch("server.start_token_capture") as start_capture:
             status, payload = self.request_json("POST", "/api/refresh-tme-token?env=acc&app=fota")
 
         self.assertEqual(status, 200)
         self.assertEqual(payload["app"], "fota")
-        self.assertTrue(payload["url"].endswith("/wallbox/listfo"))
+        self.assertTrue(payload["url"].endswith("/campaign/registry"))
         self.assertIn("fota-webapp-acc.toyota-europe.com", payload["url"])
+        self.assertIn("existing browser sessions", payload["message"])
+        read_token.assert_called_once_with("acc", allow_browser_scan=True, app="fota")
         kwargs = start_capture.call_args.kwargs
         self.assertEqual(kwargs["app"], "fota")
-        self.assertTrue(kwargs["force"])
-        cutoff = kwargs["min_issued_at"]
+        self.assertFalse(kwargs["force"])
+        self.assertEqual(kwargs["min_issued_at"], 0)
 
         body = {"token": "synthetic-fota-token", "env": "acc", "app": "fota"}
         with patch("server.store_captured_token", return_value=True) as store_token:
@@ -306,16 +377,39 @@ class TokenRouteTests(unittest.TestCase):
 
         self.assertEqual(callback_status, 200)
         self.assertEqual(callback_payload["app"], "fota")
-        store_token.assert_called_once_with(body["token"], "acc", min_issued_at=cutoff, app="fota")
+        store_token.assert_called_once_with(body["token"], "acc", min_issued_at=0, app="fota")
 
-    def test_fota_capture_fails_closed_for_unconfigured_preview(self):
-        with patch("server.start_token_capture") as start_capture:
+    def test_fota_capture_ignores_force_so_existing_session_tokens_stay_acceptable(self):
+        with patch("server.read_saved_token", return_value=""), \
+                patch("server.start_token_capture") as start_capture:
+            self.request_json("POST", "/api/refresh-tme-token?env=acc&app=fota&force=true")
+
+        self.assertFalse(start_capture.call_args.kwargs["force"])
+        self.assertEqual(start_capture.call_args.kwargs["min_issued_at"], 0)
+
+    def test_preview_fota_capture_uses_the_configured_webapp(self):
+        with patch("server.read_saved_token", return_value=""), \
+                patch("server.start_token_capture") as start_capture:
             status, payload = self.request_json("POST", "/api/refresh-tme-token?env=prev&app=fota")
 
-        self.assertEqual(status, 501)
-        self.assertFalse(payload["ok"])
-        self.assertIn("not configured", payload["message"])
-        start_capture.assert_not_called()
+        self.assertEqual(status, 200)
+        self.assertTrue(payload["ok"])
+        self.assertEqual(payload["app"], "fota")
+        self.assertEqual(
+            payload["url"],
+            "https://tme-ev-chargingplatform-fota-webapp-prev.toyota-europe.com/campaign/registry",
+        )
+        self.assertEqual(start_capture.call_args.kwargs["app"], "fota")
+
+    def test_fota_model_matrix_route_uses_the_saved_fota_token(self):
+        matrix = {"data": {"content": [], "totalElements": 0}}
+        with patch("server.read_saved_token", return_value="synthetic-fota-token"), \
+                patch("server.get_model_matrix", return_value=matrix) as get_matrix:
+            status, payload = self.request_json("GET", "/api/fota/model-matrix?env=acc")
+
+        self.assertEqual(status, 200)
+        self.assertEqual(payload["data"], matrix["data"])
+        get_matrix.assert_called_once_with("acc", "synthetic-fota-token")
 
 
 if __name__ == "__main__":

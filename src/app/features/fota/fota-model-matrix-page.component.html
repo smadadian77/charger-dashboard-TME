@@ -1,0 +1,44 @@
+<section class="fota-page" aria-labelledby="fotaMatrixHeading">
+  <header class="fota-page-heading">
+    <div>
+      <p class="fota-eyebrow">FIRMWARE CATALOG</p>
+      <h1 id="fotaMatrixHeading">Upload matrix</h1>
+    </div>
+    <span class="fota-result-count" aria-live="polite">{{ rows().length }} models</span>
+  </header>
+
+  @if (loading()) {
+    <p class="fota-state" role="status" aria-live="polite">Loading model matrix...</p>
+  } @else if (error()) {
+    <p class="fota-state fota-error" role="alert">{{ error() }}</p>
+  } @else if (rows().length === 0) {
+    <p class="fota-state" role="status">No model matrix entries are available.</p>
+  } @else {
+    <div class="fota-table-scroll">
+      <table class="fota-table">
+        <thead>
+          <tr>
+            <th scope="col">Model</th>
+            <th scope="col">Vendor</th>
+            <th scope="col">Hardware version</th>
+            <th scope="col">Firmware version</th>
+            <th scope="col">Filename</th>
+          </tr>
+        </thead>
+        <tbody>
+          @for (row of rows(); track row.modelName) {
+            @for (entry of versions(row); track entry.version) {
+              <tr>
+                <td>{{ row.modelName }}</td>
+                <td>{{ row.vendor || 'N/A' }}</td>
+                <td>{{ row.hardwareVersion || 'N/A' }}</td>
+                <td class="fota-mono">{{ entry.version }}</td>
+                <td class="fota-mono">{{ entry.filename }}</td>
+              </tr>
+            }
+          }
+        </tbody>
+      </table>
+    </div>
+  }
+</section>

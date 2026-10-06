@@ -79,6 +79,14 @@ describe('FotaApiService', () => {
     request.flush({ ok: true, env: 'acc', data: {} });
   });
 
+  it('requests the upload matrix through the local FOTA read API', () => {
+    service.getModelMatrix('acc').subscribe();
+
+    const request = http.expectOne('/api/fota/model-matrix?env=acc');
+    expect(request.request.method).toBe('GET');
+    request.flush({ ok: true, env: 'acc', data: { content: [], totalElements: 0 } });
+  });
+
   it('reads local mutation capabilities without calling a mutation endpoint', () => {
     service.getMutationCapabilities().subscribe();
 

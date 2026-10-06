@@ -3,8 +3,10 @@
 import json
 import os
 import re
+import shutil
 import subprocess
 import tempfile
+import threading
 import time
 from copy import deepcopy
 from concurrent.futures import ThreadPoolExecutor
@@ -13,15 +15,43 @@ from datetime import datetime, timedelta, timezone
 
 AWS_REGION = "eu-west-1"
 COMMAND_TIMEOUT_SECONDS = 30
-AWS_PROFILE = "EKS-ReadOnly-067615905898"
-NAMESPACE_CLUSTERS = {
-    "tme-ns-ev-backend-prd": "ev-backend-eks-prod",
-    "tme-ns-ev-virtual-gateway-prd": "ev-virtual-gateway-eks-prod",
+AWS_CREDENTIAL_TIMEOUT_SECONDS = 120
+KUBERNETES_ENVIRONMENTS = {
+    "prod": {
+        "profile": "EKS-ReadOnly-067615905898",
+        "namespaces": {
+            "tme-ns-ev-backend-prd": "ev-backend-eks-prod",
+            "tme-ns-ev-virtual-gateway-prd": "ev-virtual-gateway-eks-prod",
+        },
+    },
+    "acc": {
+        "profile": "EKS-ReadOnly-171020041320",
+        "namespaces": {
+            "tme-ns-ev-backend-uat": "ev-backend-eks-acc",
+            "tme-ns-ev-virtual-gateway-uat": "ev-virtual-gateway-eks-acc",
+        },
+    },
+    "prev": {
+        "profile": "EKS-ReadOnly-106643736876",
+        "namespaces": {
+            "tme-ns-ev-backend-prev": "ev-backend-eks-prev",
+            "tme-ns-ev-virtual-gateway-prev": "ev-virtual-gateway-eks-prev",
+        },
+    },
+    "dev": {
+        "profile": "EKS-ReadOnly-465636357526",
+        "namespaces": {
+            "tme-ns-ev-backend-dev": "ev-backend-eks-dev",
+            "tme-ns-ev-virtual-gateway-dev": "ev-virtual-gateway-eks-dev",
+        },
+    },
 }
-NAMESPACE_SELECTIONS = {"all", *NAMESPACE_CLUSTERS}
 LOG_WINDOWS = {"15m", "1h", "6h", "24h"}
 INFRASTRUCTURE_CACHE_SECONDS = 300
+AWS_CREDENTIAL_STATUS_CACHE_SECONDS = 300
 _INFRASTRUCTURE_CACHE = {}
+_CREDENTIAL_STATUS_CACHE = {}
+_CREDENTIAL_STATUS_LOCKS = {env: threading.Lock() for env in KUBERNETES_ENVIRONMENTS}
 
 
 class KubernetesReadError(Exception):
@@ -30,11 +60,51 @@ class KubernetesReadError(Exception):
         self.status_code = status_code
 
 
+class KubernetesTerminalSession:
+    def __init__(self, process, temp_dir, namespace, pod, container):
+        self.process = process
+        self.temp_dir = temp_dir
+        self.namespace = namespace
+        self.pod = pod
+        self.container = container
+        self.closed = False
+
+    def close(self):
+        if self.closed:
+            return
+        self.closed = True
+        if self.process.poll() is None:
+            self.process.terminate()
+            try:
+                self.process.wait(timeout=3)
+            except subprocess.TimeoutExpired:
+                self.process.kill()
+                self.process.wait(timeout=3)
+        shutil.rmtree(self.temp_dir, ignore_errors=True)
+
+
 def _normalize_env(env):
     normalized = str(env or "").strip().lower()
-    if normalized not in {"", "prod"}:
-        raise KubernetesReadError(400, "Kubernetes access is limited to the production namespaces.")
-    return "prod"
+    if not normalized:
+        return "prod"
+    if normalized not in KUBERNETES_ENVIRONMENTS:
+        raise KubernetesReadError(400, "Unsupported Kubernetes environment.")
+    return normalized
+
+
+def _environment_profile(env):
+    return KUBERNETES_ENVIRONMENTS[_normalize_env(env)]["profile"]
+
+
+def _environment_namespaces(env):
+    return KUBERNETES_ENVIRONMENTS[_normalize_env(env)]["namespaces"]
+
+
+def _environment_cluster(env, namespace):
+    cluster = _environment_namespaces(env).get(namespace)
+    if not cluster:
+        raise KubernetesReadError(400, "Unsupported Kubernetes namespace.")
+    return cluster
 
 
 def _run_command(command, timeout=COMMAND_TIMEOUT_SECONDS, env=None):
@@ -55,38 +125,49 @@ def _run_command(command, timeout=COMMAND_TIMEOUT_SECONDS, env=None):
 
 
 def credential_status(env):
-    _normalize_env(env)
-    try:
-        result = _run_command(
-            ["aws", "sts", "get-caller-identity", "--profile", AWS_PROFILE, "--output", "json"],
-            timeout=15,
-        )
-    except KubernetesReadError as exc:
-        if exc.status_code == 503:
-            return {"env": "prod", "authenticated": False, "status": "cli-missing", "message": str(exc)}
-        raise
+    env = _normalize_env(env)
+    profile = _environment_profile(env)
+    with _CREDENTIAL_STATUS_LOCKS[env]:
+        cached = _CREDENTIAL_STATUS_CACHE.get(env)
+        if cached and time.monotonic() - cached[0] < AWS_CREDENTIAL_STATUS_CACHE_SECONDS:
+            return cached[1].copy()
 
-    if result.returncode != 0:
-        return {"env": "prod", "authenticated": False, "status": "login-required"}
+        try:
+            result = _run_command(
+                ["aws", "sts", "get-caller-identity", "--profile", profile, "--output", "json"],
+                timeout=AWS_CREDENTIAL_TIMEOUT_SECONDS,
+            )
+        except KubernetesReadError as exc:
+            if exc.status_code != 503:
+                raise
+            status = {"env": env, "authenticated": False, "status": "cli-missing", "message": str(exc)}
+        else:
+            if result.returncode != 0:
+                status = {"env": env, "authenticated": False, "status": "login-required"}
+            else:
+                try:
+                    identity = json.loads(result.stdout)
+                except (TypeError, json.JSONDecodeError):
+                    status = {"env": env, "authenticated": False, "status": "identity-error"}
+                else:
+                    status = {
+                        "env": env,
+                        "authenticated": bool(identity.get("Account")),
+                        "status": "ready" if identity.get("Account") else "identity-error",
+                        "account": identity.get("Account", ""),
+                        "principal": identity.get("Arn", "").rsplit("/", 1)[-1],
+                    }
 
-    try:
-        identity = json.loads(result.stdout)
-    except (TypeError, json.JSONDecodeError):
-        return {"env": "prod", "authenticated": False, "status": "identity-error"}
-    return {
-        "env": "prod",
-        "authenticated": bool(identity.get("Account")),
-        "status": "ready" if identity.get("Account") else "identity-error",
-        "account": identity.get("Account", ""),
-        "principal": identity.get("Arn", "").rsplit("/", 1)[-1],
-    }
+        if status["status"] != "login-required":
+            _CREDENTIAL_STATUS_CACHE[env] = (time.monotonic(), status)
+        return status.copy()
 
 
 def start_sso_login(env):
-    _normalize_env(env)
+    env = _normalize_env(env)
     try:
         process = subprocess.Popen(
-            ["aws", "sso", "login", "--profile", AWS_PROFILE],
+            ["aws", "sso", "login", "--profile", _environment_profile(env)],
             stdin=subprocess.DEVNULL,
             stdout=subprocess.DEVNULL,
             stderr=subprocess.DEVNULL,
@@ -94,7 +175,47 @@ def start_sso_login(env):
         )
     except FileNotFoundError as exc:
         raise KubernetesReadError(503, "AWS CLI is not installed or is not on PATH.") from exc
-    return {"env": "prod", "started": process.poll() is None}
+    return {"env": env, "started": process.poll() is None}
+
+
+def start_pod_terminal(env, namespace, pod, container):
+    env = _normalize_env(env)
+    cluster_name = _environment_cluster(env, namespace)
+    profile = _environment_profile(env)
+    if not credential_status(env)["authenticated"]:
+        raise KubernetesReadError(401, f"AWS SSO login is required for the {env.upper()} profile.")
+    if not isinstance(pod, str) or len(pod) > 253 or not re.fullmatch(r"[a-z0-9](?:[-a-z0-9.]*[a-z0-9])?", pod):
+        raise KubernetesReadError(400, "Invalid pod name.")
+    if not isinstance(container, str) or len(container) > 63 or not re.fullmatch(r"[a-z0-9](?:[-a-z0-9]*[a-z0-9])?", container):
+        raise KubernetesReadError(400, "Invalid container name.")
+
+    temp_dir = tempfile.mkdtemp(prefix="charger-dashboard-eks-terminal-")
+    kubeconfig = os.path.join(temp_dir, "config")
+    try:
+        update = _run_command([
+            "aws", "eks", "update-kubeconfig", "--region", AWS_REGION, "--name", cluster_name,
+            "--profile", profile, "--kubeconfig", kubeconfig,
+        ])
+        if update.returncode != 0:
+            raise KubernetesReadError(502, "Unable to connect to the selected EKS cluster.")
+        process = subprocess.Popen(
+            [
+                "kubectl", "exec", pod, "--namespace", namespace, "--container", container,
+                "--stdin", "--kubeconfig", kubeconfig, "--request-timeout=15s", "--", "/bin/sh", "-i",
+            ],
+            stdin=subprocess.PIPE,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            bufsize=0,
+            close_fds=os.name != "nt",
+        )
+        return KubernetesTerminalSession(process, temp_dir, namespace, pod, container)
+    except FileNotFoundError as exc:
+        shutil.rmtree(temp_dir, ignore_errors=True)
+        raise KubernetesReadError(503, "kubectl CLI is not installed or is not on PATH.") from exc
+    except Exception:
+        shutil.rmtree(temp_dir, ignore_errors=True)
+        raise
 
 
 def _pod_age(timestamp):
@@ -251,10 +372,10 @@ def _normalize_node(node):
     }
 
 
-def _aws_json(arguments, timeout=15):
+def _aws_json(arguments, timeout=15, env="prod"):
     try:
         result = _run_command([
-            "aws", *arguments, "--region", AWS_REGION, "--profile", AWS_PROFILE, "--output", "json",
+            "aws", *arguments, "--region", AWS_REGION, "--profile", _environment_profile(env), "--output", "json",
         ], timeout=timeout)
     except KubernetesReadError:
         return None
@@ -266,7 +387,7 @@ def _aws_json(arguments, timeout=15):
         return None
 
 
-def _enrich_nodes_with_aws(nodes):
+def _enrich_nodes_with_aws(nodes, env="prod"):
     instance_ids = sorted({node["instanceId"] for node in nodes if re.fullmatch(r"i-[0-9a-f]+", node["instanceId"])})
     if not instance_ids:
         for node in nodes:
@@ -277,7 +398,7 @@ def _enrich_nodes_with_aws(nodes):
     instances = _aws_json([
         "ec2", "describe-instances", *common_ids, "--query",
         "Reservations[].Instances[].[InstanceId,State.Name,Placement.AvailabilityZone,InstanceType]",
-    ])
+    ], env=env)
     instance_by_id = {
         row[0]: {"state": row[1], "zone": row[2], "instanceType": row[3]}
         for row in (instances or []) if isinstance(row, list) and len(row) >= 4
@@ -285,7 +406,7 @@ def _enrich_nodes_with_aws(nodes):
     statuses = _aws_json([
         "ec2", "describe-instance-status", "--include-all-instances", *common_ids, "--query",
         "InstanceStatuses[].{InstanceId:InstanceId,SystemStatus:SystemStatus.Status,InstanceStatus:InstanceStatus.Status,Events:Events[].{Code:Code,Description:Description,NotBefore:NotBefore,NotAfter:NotAfter}}",
-    ])
+    ], env=env)
     status_by_id = {item.get("InstanceId"): item for item in (statuses or [])}
 
     end = datetime.now(timezone.utc)
@@ -311,7 +432,7 @@ def _enrich_nodes_with_aws(nodes):
         "cloudwatch", "get-metric-data", "--start-time", (end - timedelta(hours=24)).isoformat(),
         "--end-time", end.isoformat(), "--metric-data-queries", json.dumps(queries),
         "--scan-by", "TimestampAscending",
-    ], timeout=20) if queries else None
+    ], timeout=20, env=env) if queries else None
     cpu_by_id = {}
     if cpu_payload is not None:
         for result in cpu_payload.get("MetricDataResults", []):
@@ -328,7 +449,7 @@ def _enrich_nodes_with_aws(nodes):
             "cloudwatch", "describe-alarms-for-metric", "--namespace", "AWS/EC2",
             "--metric-name", "CPUUtilization", "--dimensions", f"Name=InstanceId,Value={instance_id}",
             "--query", "MetricAlarms[].{name:AlarmName,state:StateValue,reason:StateReason}",
-        ])
+        ], env=env)
 
     with ThreadPoolExecutor(max_workers=min(8, len(instance_ids))) as executor:
         alarm_results = list(executor.map(read_alarms, instance_ids))
@@ -443,13 +564,14 @@ def _read_metrics(kubeconfig, namespace):
 
 
 def _read_namespace(env, namespace):
-    cluster_name = NAMESPACE_CLUSTERS[namespace]
+    cluster_name = _environment_cluster(env, namespace)
+    profile = _environment_profile(env)
     try:
         with tempfile.TemporaryDirectory(prefix="charger-dashboard-eks-") as temp_dir:
             kubeconfig = os.path.join(temp_dir, "config")
             update = _run_command([
                 "aws", "eks", "update-kubeconfig", "--region", AWS_REGION, "--name", cluster_name,
-                "--profile", AWS_PROFILE, "--kubeconfig", kubeconfig,
+                "--profile", profile, "--kubeconfig", kubeconfig,
             ])
             if update.returncode != 0:
                 return {
@@ -577,17 +699,18 @@ def _deduplicate_events(events):
 
 
 def list_pods(env, namespace="all"):
-    _normalize_env(env)
-    if namespace not in NAMESPACE_SELECTIONS:
+    env = _normalize_env(env)
+    environment_namespaces = _environment_namespaces(env)
+    if namespace not in {"all", *environment_namespaces}:
         raise KubernetesReadError(400, "Unsupported Kubernetes namespace selection.")
 
-    credentials = credential_status("prod")
+    credentials = credential_status(env)
     if not credentials["authenticated"]:
-        raise KubernetesReadError(401, "AWS SSO login is required for the production read-only profile.")
+        raise KubernetesReadError(401, f"AWS SSO login is required for the {env.upper()} profile.")
 
-    namespaces = list(NAMESPACE_CLUSTERS) if namespace == "all" else [namespace]
+    namespaces = list(environment_namespaces) if namespace == "all" else [namespace]
     with ThreadPoolExecutor(max_workers=len(namespaces)) as executor:
-        snapshots = list(executor.map(lambda item: _read_namespace("prod", item), namespaces))
+        snapshots = list(executor.map(lambda item: _read_namespace(env, item), namespaces))
     pods = [pod for snapshot in snapshots for pod in snapshot["pods"]]
     deployments = [deployment | {"namespace": snapshot["namespace"]} for snapshot in snapshots for deployment in snapshot.get("deployments", [])]
     nodes = [node | {"namespace": snapshot["namespace"], "cluster": snapshot["cluster"]} for snapshot in snapshots for node in snapshot.get("nodes", [])]
@@ -603,7 +726,7 @@ def list_pods(env, namespace="all"):
         "warningEvents": sum(event["type"] == "Warning" for event in events),
     }
     return {
-        "env": "prod",
+        "env": env,
         "namespace": namespace,
         "namespaces": snapshots,
         "fetchedAt": datetime.now(timezone.utc).isoformat(),
@@ -618,13 +741,14 @@ def list_pods(env, namespace="all"):
     }
 
 
-def _read_namespace_infrastructure(namespace):
-    cluster_name = NAMESPACE_CLUSTERS[namespace]
+def _read_namespace_infrastructure(namespace, env="prod"):
+    cluster_name = _environment_cluster(env, namespace)
+    profile = _environment_profile(env)
     with tempfile.TemporaryDirectory(prefix="charger-dashboard-eks-") as temp_dir:
         kubeconfig = os.path.join(temp_dir, "config")
         update = _run_command([
             "aws", "eks", "update-kubeconfig", "--region", AWS_REGION, "--name", cluster_name,
-            "--profile", AWS_PROFILE, "--kubeconfig", kubeconfig,
+            "--profile", profile, "--kubeconfig", kubeconfig,
         ])
         if update.returncode != 0:
             return {"namespace": namespace, "cluster": cluster_name, "nodes": [], "availability": {"nodes": False, "ec2": False, "cloudWatchCpu": False, "alarms": False}, "errors": {"nodes": "Unable to connect to the EKS cluster."}}
@@ -659,7 +783,7 @@ def _read_namespace_infrastructure(namespace):
             nodes_available = nodes_available and len(nodes) == len(node_names)
         if nodes:
             try:
-                _enrich_nodes_with_aws(nodes)
+                _enrich_nodes_with_aws(nodes, env)
             except (KubernetesReadError, TypeError, ValueError):
                 for node in nodes:
                     node["aws"] = {"available": False, "cpuAvailable": False, "alarmsAvailable": False, "events": [], "cpu": [], "alarms": []}
@@ -686,18 +810,20 @@ def _read_namespace_infrastructure(namespace):
 
 
 def get_node_infrastructure(env, namespace="all", force=False):
-    _normalize_env(env)
-    if namespace not in NAMESPACE_SELECTIONS:
+    env = _normalize_env(env)
+    environment_namespaces = _environment_namespaces(env)
+    if namespace not in {"all", *environment_namespaces}:
         raise KubernetesReadError(400, "Unsupported Kubernetes namespace selection.")
-    if not credential_status("prod")["authenticated"]:
-        raise KubernetesReadError(401, "AWS SSO login is required for the production read-only profile.")
+    if not credential_status(env)["authenticated"]:
+        raise KubernetesReadError(401, f"AWS SSO login is required for the {env.upper()} profile.")
 
-    namespaces = list(NAMESPACE_CLUSTERS) if namespace == "all" else [namespace]
+    namespaces = list(environment_namespaces) if namespace == "all" else [namespace]
     now = time.monotonic()
     snapshots_by_namespace = {}
     uncached = []
     for item in namespaces:
-        cached = _INFRASTRUCTURE_CACHE.get(item)
+        cache_key = (env, item)
+        cached = _INFRASTRUCTURE_CACHE.get(cache_key)
         if not force and cached and now - cached[0] < INFRASTRUCTURE_CACHE_SECONDS:
             snapshots_by_namespace[item] = deepcopy(cached[1])
         else:
@@ -705,20 +831,20 @@ def get_node_infrastructure(env, namespace="all", force=False):
 
     def read_infrastructure(item):
         try:
-            return _read_namespace_infrastructure(item)
+            return _read_namespace_infrastructure(item, env)
         except KubernetesReadError:
-            return {"namespace": item, "cluster": NAMESPACE_CLUSTERS[item], "nodes": [], "availability": {"nodes": False, "ec2": False, "cloudWatchCpu": False, "alarms": False}, "errors": {"nodes": "Optional infrastructure context is unavailable."}}
+            return {"namespace": item, "cluster": _environment_cluster(env, item), "nodes": [], "availability": {"nodes": False, "ec2": False, "cloudWatchCpu": False, "alarms": False}, "errors": {"nodes": "Optional infrastructure context is unavailable."}}
 
     if uncached:
         with ThreadPoolExecutor(max_workers=len(uncached)) as executor:
             fresh_snapshots = list(executor.map(read_infrastructure, uncached))
         for item, snapshot in zip(uncached, fresh_snapshots):
-            _INFRASTRUCTURE_CACHE[item] = (now, snapshot)
+            _INFRASTRUCTURE_CACHE[(env, item)] = (now, snapshot)
             snapshots_by_namespace[item] = snapshot
     snapshots = [snapshots_by_namespace[item] for item in namespaces]
     nodes = [node | {"namespace": snapshot["namespace"], "cluster": snapshot["cluster"]} for snapshot in snapshots for node in snapshot["nodes"]]
     return {
-        "env": "prod",
+        "env": env,
         "namespace": namespace,
         "fetchedAt": datetime.now(timezone.utc).isoformat(),
         "namespaces": snapshots,
@@ -727,24 +853,23 @@ def get_node_infrastructure(env, namespace="all", force=False):
 
 
 def get_pod_logs(env, namespace, pod, container="", previous=False, since="1h"):
-    _normalize_env(env)
-    if namespace not in NAMESPACE_CLUSTERS:
-        raise KubernetesReadError(400, "Unsupported Kubernetes namespace.")
+    env = _normalize_env(env)
+    cluster_name = _environment_cluster(env, namespace)
+    profile = _environment_profile(env)
     if not isinstance(pod, str) or len(pod) > 253 or not re.fullmatch(r"[a-z0-9](?:[-a-z0-9.]*[a-z0-9])?", pod):
         raise KubernetesReadError(400, "Invalid pod name.")
     if container and (len(container) > 63 or not re.fullmatch(r"[a-z0-9](?:[-a-z0-9]*[a-z0-9])?", container)):
         raise KubernetesReadError(400, "Invalid container name.")
     if since not in LOG_WINDOWS:
         raise KubernetesReadError(400, "Unsupported log time window.")
-    if not credential_status("prod")["authenticated"]:
-        raise KubernetesReadError(401, "AWS SSO login is required for the production read-only profile.")
+    if not credential_status(env)["authenticated"]:
+        raise KubernetesReadError(401, f"AWS SSO login is required for the {env.upper()} profile.")
 
     with tempfile.TemporaryDirectory(prefix="charger-dashboard-eks-") as temp_dir:
         kubeconfig = os.path.join(temp_dir, "config")
-        cluster_name = NAMESPACE_CLUSTERS[namespace]
         update = _run_command([
             "aws", "eks", "update-kubeconfig", "--region", AWS_REGION, "--name", cluster_name,
-            "--profile", AWS_PROFILE, "--kubeconfig", kubeconfig,
+            "--profile", profile, "--kubeconfig", kubeconfig,
         ])
         if update.returncode != 0:
             raise KubernetesReadError(502, "Unable to connect to the selected EKS cluster.")

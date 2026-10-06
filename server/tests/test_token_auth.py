@@ -8,6 +8,7 @@ from unittest.mock import MagicMock, patch
 
 from backend.auth import (
     ENV_CLIENT_IDS,
+    FOTA_CLIENT_IDS,
     capture_token_from_browser,
     get_token_status,
     is_token_expired,
@@ -40,6 +41,17 @@ class TokenAuthTests(unittest.TestCase):
         self.assertTrue(is_tme_token(acc_token, "acc"))
         self.assertFalse(is_tme_token(graph_token, "prod"))
         self.assertFalse(is_tme_token(malformed_audience, "prod"))
+
+    def test_fota_token_audience_is_app_and_environment_specific(self):
+        exp = int(time.time()) + 3600
+        prod_fota = make_token({"aud": next(iter(FOTA_CLIENT_IDS["prod"])), "exp": exp})
+        acc_fota = make_token({"aud": next(iter(FOTA_CLIENT_IDS["acc"])), "exp": exp})
+
+        self.assertTrue(is_tme_token(prod_fota, "prod", app="fota"))
+        self.assertFalse(is_tme_token(prod_fota, "prod", app="charger"))
+        self.assertTrue(is_tme_token(acc_fota, "acc", app="fota"))
+        self.assertTrue(is_tme_token(acc_fota, "prev", app="fota"))
+        self.assertFalse(is_tme_token(acc_fota, "prod", app="fota"))
 
     def test_token_expiry_requires_a_finite_future_expiration(self):
         self.assertFalse(is_token_expired(make_token({"aud": next(iter(ENV_CLIENT_IDS["prod"])), "exp": int(time.time()) + 3600})))
@@ -89,8 +101,9 @@ class TokenAuthTests(unittest.TestCase):
 
     def test_charger_and_fota_tokens_are_stored_and_deleted_independently(self):
         audience = next(iter(ENV_CLIENT_IDS["prod"]))
+        fota_audience = next(iter(FOTA_CLIENT_IDS["prod"]))
         charger_token = make_token({"aud": audience, "exp": int(time.time()) + 3600, "iat": 100})
-        fota_token = make_token({"aud": audience, "exp": int(time.time()) + 3600, "iat": 200})
+        fota_token = make_token({"aud": fota_audience, "exp": int(time.time()) + 3600, "iat": 200})
 
         with tempfile.TemporaryDirectory() as directory:
             def token_path(env, app="charger"):
@@ -148,6 +161,26 @@ class TokenAuthTests(unittest.TestCase):
                 self.assertEqual(read_saved_token("prod"), "")
         scan_browser.assert_not_called()
 
+    def test_fota_browser_scan_saves_only_a_fota_audience_token(self):
+        audience = next(iter(FOTA_CLIENT_IDS["prod"]))
+        token = make_token({"aud": audience, "exp": int(time.time()) + 3600})
+        with tempfile.TemporaryDirectory() as directory:
+            token_path = os.path.join(directory, "missing-fota-token.json")
+            with patch("backend.auth.get_token_file", return_value=token_path), \
+                    patch("backend.auth.capture_token_from_browser", return_value=token) as scan_browser:
+                self.assertEqual(read_saved_token("prod", allow_browser_scan=True, app="fota"), token)
+                scan_browser.assert_called_once_with("prod", app="fota")
+
+    def test_legacy_fota_token_without_source_marker_is_rejected(self):
+        audience = next(iter(ENV_CLIENT_IDS["prod"]))
+        token = make_token({"aud": audience, "exp": int(time.time()) + 3600})
+        with tempfile.TemporaryDirectory() as directory:
+            token_path = os.path.join(directory, "legacy-fota-token.json")
+            with open(token_path, "w", encoding="utf-8") as handle:
+                json.dump({"token": token, "env": "prod", "app": "fota"}, handle)
+            with patch("backend.auth.get_token_file", return_value=token_path):
+                self.assertEqual(read_saved_token("prod", app="fota"), "")
+
     def test_browser_scan_extracts_synthetic_utf16_storage_token_for_environment(self):
         audience = next(iter(ENV_CLIENT_IDS["prod"]))
         token = make_token({"aud": audience, "exp": int(time.time()) + 3600})
@@ -158,7 +191,7 @@ class TokenAuthTests(unittest.TestCase):
                 handle.write(b"synthetic")
             with patch("tme_token_bridge.storage_dirs", return_value=[directory]), \
                     patch("tme_token_bridge.read_shared", return_value=storage_bytes):
-                captured = capture_token_from_browser("prod")
+                captured = capture_token_from_browser("prod", app="charger")
 
         self.assertEqual(captured, token)
 

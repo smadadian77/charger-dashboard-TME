@@ -60,8 +60,14 @@ ENV_CLIENT_IDS = {
     "prev": {"999bf820-34e8-4078-9908-a9b99ea0fbce", "769328e8-3732-45f2-9724-34dba356564e"},
 }
 
+FOTA_CLIENT_IDS = {
+    "prod": {"5d737712-d090-4011-95d0-76c42c7cf269"},
+    "acc": {"00861c8a-6547-4855-8a6b-2fe32267dbf2"},
+    "prev": {"00861c8a-6547-4855-8a6b-2fe32267dbf2"},
+}
 
-def is_tme_token(token, env="prod"):
+
+def is_tme_token(token, env="prod", app="charger"):
     payload = decode_jwt_payload(str(token or "").strip())
     if not isinstance(payload, dict):
         return False
@@ -79,7 +85,8 @@ def is_tme_token(token, env="prod"):
         return False
 
     norm_env = normalize_env(env)
-    allowed = ENV_CLIENT_IDS.get(norm_env, set())
+    client_ids = FOTA_CLIENT_IDS if normalize_token_app(app) == "fota" else ENV_CLIENT_IDS
+    allowed = client_ids.get(norm_env, set())
     if not (audiences & allowed):
         return False
 
@@ -87,18 +94,22 @@ def is_tme_token(token, env="prod"):
 
 
 def _read_saved_token_file(env, app="charger"):
+    norm_app = normalize_token_app(app)
     try:
-        with open(get_token_file(env, app), "r", encoding="utf-8") as handle:
+        with open(get_token_file(env, norm_app), "r", encoding="utf-8") as handle:
             data = json.load(handle)
         if not isinstance(data, dict):
+            return ""
+        if norm_app == "fota" and data.get("source") != "fota-webapp":
             return ""
         return str(data.get("token", "") or "").strip()
     except (OSError, ValueError, TypeError):
         return ""
 
 
-def capture_token_from_browser(env="prod"):
+def capture_token_from_browser(env="prod", app="charger"):
     norm_env = normalize_env(env)
+    norm_app = normalize_token_app(app)
     try:
         from tme_token_bridge import (
             extract_jwts,
@@ -120,7 +131,7 @@ def capture_token_from_browser(env="prod"):
         best_exp = -1
         seen = set()
         for token in candidates:
-            if not token or token in seen or is_token_expired(token) or not is_tme_token(token, env=norm_env):
+            if not token or token in seen or is_token_expired(token) or not is_tme_token(token, env=norm_env, app=norm_app):
                 continue
             seen.add(token)
             payload = decode_jwt_payload(token) or {}
@@ -137,13 +148,13 @@ def read_saved_token(env="prod", allow_browser_scan=False, app="charger"):
     norm_env = normalize_env(env)
     norm_app = normalize_token_app(app)
     token = _read_saved_token_file(norm_env, norm_app)
-    if token and not is_token_expired(token) and is_tme_token(token, env=norm_env):
+    if token and not is_token_expired(token) and is_tme_token(token, env=norm_env, app=norm_app):
         return token
 
     if allow_browser_scan:
         try:
-            token = capture_token_from_browser(norm_env)
-            if token and not is_token_expired(token) and is_tme_token(token, env=norm_env):
+            token = capture_token_from_browser(norm_env, app=norm_app)
+            if token and not is_token_expired(token) and is_tme_token(token, env=norm_env, app=norm_app):
                 write_saved_token(token, env=norm_env, app=norm_app)
                 return token
         except Exception:
@@ -158,6 +169,8 @@ def write_saved_token(token, env="prod", app="charger"):
     token_dir = os.path.dirname(token_file)
     os.makedirs(token_dir, exist_ok=True)
     payload = {"token": str(token or "").strip(), "env": normalize_env(env), "app": norm_app}
+    if norm_app == "fota":
+        payload["source"] = "fota-webapp"
     temporary_path = None
     try:
         with tempfile.NamedTemporaryFile("w", encoding="utf-8", dir=token_dir, delete=False) as handle:
@@ -183,7 +196,7 @@ def store_captured_token(token, env="prod", min_issued_at=0, app="charger"):
     value = str(token or "").strip()
     norm_env = normalize_env(env)
     norm_app = normalize_token_app(app)
-    if is_token_expired(value) or not is_tme_token(value, env=norm_env):
+    if is_token_expired(value) or not is_tme_token(value, env=norm_env, app=norm_app):
         return False
     if min_issued_at:
         payload = decode_jwt_payload(value) or {}
@@ -273,7 +286,7 @@ def get_token_status(env="prod", app="charger"):
     norm_env = normalize_env(env)
     norm_app = normalize_token_app(app)
     stored_token = _read_saved_token_file(norm_env, norm_app)
-    token = stored_token if stored_token and not is_token_expired(stored_token) and is_tme_token(stored_token, env=norm_env) else ""
+    token = stored_token if stored_token and not is_token_expired(stored_token) and is_tme_token(stored_token, env=norm_env, app=norm_app) else ""
     stored_payload = decode_jwt_payload(stored_token) if stored_token else None
     stored_expiration = _expiration_seconds(stored_payload)
     capturing = is_token_capture_running(norm_env, norm_app)
