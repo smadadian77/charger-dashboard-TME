@@ -4,15 +4,20 @@
       <p class="fota-eyebrow">FIRMWARE CATALOG</p>
       <h1 id="fotaMatrixHeading">Upload matrix</h1>
     </div>
-    <span class="fota-result-count" aria-live="polite">{{ rows().length }} models</span>
+    <span class="fota-result-count" aria-live="polite">{{ filteredRows().length }} models / {{ mappingCount() }} firmware mappings</span>
   </header>
+
+  <label class="fota-matrix-search">
+    <span>Search model, hardware, firmware version, or filename</span>
+    <input type="search" [value]="search()" (input)="setSearch($event)" />
+  </label>
 
   @if (loading()) {
     <p class="fota-state" role="status" aria-live="polite">Loading model matrix...</p>
   } @else if (error()) {
     <p class="fota-state fota-error" role="alert">{{ error() }}</p>
-  } @else if (rows().length === 0) {
-    <p class="fota-state" role="status">No model matrix entries are available.</p>
+  } @else if (filteredRows().length === 0) {
+    <p class="fota-state" role="status">{{ search().trim() ? 'No matrix entries match this search.' : 'No model matrix entries are available.' }}</p>
   } @else {
     <div class="fota-table-scroll">
       <table class="fota-table">
@@ -26,7 +31,7 @@
           </tr>
         </thead>
         <tbody>
-          @for (row of rows(); track row.modelName) {
+          @for (row of filteredRows(); track row.modelName) {
             @for (entry of versions(row); track entry.version) {
               <tr>
                 <td>{{ row.modelName }}</td>

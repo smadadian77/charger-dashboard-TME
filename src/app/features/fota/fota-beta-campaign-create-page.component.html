@@ -32,7 +32,7 @@
           <span>Beta firmware version</span>
           <select formControlName="firmwareVersion">
             <option value="">Select a firmware version</option>
-            @for (version of versions(); track version) { <option [value]="version">{{ version }}</option> }
+            @for (version of versions(); track version) { <option [value]="version">{{ version }} - {{ approvalStatus(version) }}</option> }
           </select>
         </label>
         <label class="fota-check-label">
@@ -56,6 +56,12 @@
 
       <fieldset class="fota-beta-targets">
         <legend>Beta wallboxes ({{ form.controls.betaWallboxesList.value.length }} selected)</legend>
+        @if (form.controls.model.value && eligibleWallboxes().length > 0) {
+          <div class="fota-filter-actions">
+            <button class="fota-secondary-button" type="button" (click)="selectEligibleWallboxes()">Select all {{ eligibleWallboxes().length }}</button>
+            <button class="fota-secondary-button" type="button" [disabled]="form.controls.betaWallboxesList.value.length === 0" (click)="clearWallboxSelection()">Clear selection</button>
+          </div>
+        }
         @if (!form.controls.model.value) {
           <p class="fota-state">Select a model to view its beta wallboxes.</p>
         } @else if (eligibleWallboxes().length === 0) {

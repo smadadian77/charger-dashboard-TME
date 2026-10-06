@@ -6,6 +6,7 @@ import { BehaviorSubject, EMPTY, combineLatest, catchError, finalize, switchMap,
 import { FotaApiService } from './fota-api.service';
 import { FotaEnvironmentService } from './fota-environment.service';
 import { FotaEnvironment, FotaMetadata, FotaPageQuery, FotaWallbox, FotaWallboxFilters } from './fota.models';
+import { isValidChargerSerial, normalizeSerialNumber } from '../../serial-number-utils';
 
 interface WallboxQuery extends FotaPageQuery<FotaWallboxFilters> {
   beta: boolean;
@@ -28,6 +29,7 @@ export class FotaBetaWallboxesPageComponent implements OnInit {
   readonly totalItems = signal(0);
   readonly loading = signal(true);
   readonly error = signal<string | null>(null);
+  readonly selectedWallbox = signal<FotaWallbox | null>(null);
   readonly metadata = signal<FotaMetadata | null>(null);
   readonly metadataError = signal<string | null>(null);
   readonly mutationCapabilities = signal<{ enabled: boolean; reason?: string | null } | null>(null);
@@ -54,6 +56,7 @@ export class FotaBetaWallboxesPageComponent implements OnInit {
   });
 
   @ViewChild('betaPoolMutationDialog') private betaPoolMutationDialog?: ElementRef<HTMLDialogElement>;
+  @ViewChild('wallboxDetails') private wallboxDetails?: ElementRef<HTMLDialogElement>;
 
   readonly modelOptions = computed(() => this.metadata()?.models?.data?.models ?? []);
   readonly versionOptions = computed(() => this.metadata()?.versions?.data?.firmwaresVersion ?? []);
@@ -114,7 +117,8 @@ export class FotaBetaWallboxesPageComponent implements OnInit {
   applyFilters(): void {
     const values = this.filters.getRawValue();
     const filters: FotaWallboxFilters = {};
-    if (values.serialNumber.trim()) filters.serialNumber = values.serialNumber.trim();
+    const serialNumber = normalizeSerialNumber(values.serialNumber);
+    if (serialNumber) filters.serialNumber = serialNumber;
     if (values.model) filters.model = values.model;
     if (values.version) filters.version = values.version;
     if (values.status) filters.status = values.status;
@@ -138,13 +142,14 @@ export class FotaBetaWallboxesPageComponent implements OnInit {
   }
 
   checkMembership(): void {
-    const serial = this.membershipForm.controls.serialNumber.value.trim();
-    if (serial.length !== 15 && serial.length !== 16) {
-      this.membershipError.set('Enter a 15- or 16-character serial number.');
+    const serial = normalizeSerialNumber(this.membershipForm.controls.serialNumber.value);
+    if (!isValidChargerSerial(serial)) {
+      this.membershipError.set('Enter a complete TACW serial number with 10 to 12 letters or numbers after the prefix.');
       this.membershipResult.set(null);
       return;
     }
 
+    this.membershipSerial.setValue(serial);
     this.membershipLoading.set(true);
     this.membershipError.set(null);
     this.membershipResult.set(null);
@@ -220,6 +225,22 @@ export class FotaBetaWallboxesPageComponent implements OnInit {
     } catch {
       return countryId;
     }
+  }
+
+  connectorSummary(item: FotaWallbox): string {
+    return (item.connectors ?? []).map((connector, index) =>
+      `Connector ${connector.id ?? index + 1}: ${connector.status || 'N/A'}`
+    ).join('; ') || 'Not supplied';
+  }
+
+  openDetails(item: FotaWallbox): void {
+    this.selectedWallbox.set(item);
+    this.wallboxDetails?.nativeElement.showModal();
+  }
+
+  closeDetails(): void {
+    this.wallboxDetails?.nativeElement.close();
+    this.selectedWallbox.set(null);
   }
 
   private errorMessage(error: unknown): string {

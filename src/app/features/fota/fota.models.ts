@@ -26,8 +26,13 @@ export interface FotaPackage {
   firmwareUri?: string | null;
   testReportUri?: string | null;
   approvalStatus?: string | null;
-  archived?: boolean;
+  archivingReason?: string | null;
+  archived?: boolean | null;
   beta?: boolean;
+  createdBy?: string | null;
+  createdOn?: string | null;
+  updatedBy?: string | null;
+  updatedOn?: string | null;
 }
 
 export interface FotaCampaign {
@@ -38,9 +43,12 @@ export interface FotaCampaign {
   createdOn?: string | null;
   updatedOn?: string | null;
   parent?: string | null;
-  children?: unknown[] | null;
+  children?: string[] | null;
   overallCampaignStatus?: string | null;
   beta?: boolean;
+  countryId?: string | null;
+  createdBy?: string | null;
+  updatedBy?: string | null;
 }
 
 export interface FotaLaunchedCampaign {
@@ -49,7 +57,7 @@ export interface FotaLaunchedCampaign {
   overallCampaignStatus?: string;
   isPushable?: boolean;
   parent?: string | null;
-  children?: unknown[] | null;
+  children?: string[] | null;
 }
 
 export interface FotaLaunchedCampaignResponse {
@@ -60,10 +68,17 @@ export interface FotaWallbox {
   serialNumber: string;
   model?: string | null;
   version?: string | null;
-  connectors?: Array<{ status?: string | null }> | null;
+  connectors?: Array<{ id?: string | number | null; status?: string | null }> | null;
   countryId?: string | null;
-  pendingCampaignList?: unknown[] | null;
-  beta?: boolean;
+  pendingCampaignList?: Array<{
+    campaignId: string;
+    firmwareUpdateStatus?: string | null;
+    firmwareVersion?: string | null;
+    isChildVersionInstalled?: boolean | null;
+  }> | null;
+  pendingFirmwareUpdate?: boolean | null;
+  isFirmwareUpdateRequested?: boolean | null;
+  beta?: boolean | null;
 }
 
 export interface FotaPackageFilters {

@@ -68,6 +68,7 @@
             <span class="fota-readiness" [class.is-ready]="isBeta() ? item.approvalStatus === 'TESTED' : item.isPushable">
               {{ isBeta() ? (item.approvalStatus || 'Not tested') : (item.isPushable ? 'Production ready' : 'No production ready') }}
             </span>
+            @if (item.archived) { <span class="fota-archive-flag">Archived</span> }
           </header>
           <dl class="fota-package-data">
             <div><dt>Model</dt><dd>{{ item.model || 'N/A' }}</dd></div>
@@ -132,8 +133,23 @@
       <div><dt>{{ isBeta() ? 'Beta approval' : 'Production readiness' }}</dt><dd>{{ isBeta() ? (item.approvalStatus || 'Not tested') : (item.isPushable ? 'Production ready' : 'No production ready') }}</dd></div>
       <div><dt>Approval</dt><dd>{{ item.approvalStatus || (isBeta() ? 'Not tested' : 'Not supplied') }}</dd></div>
       <div><dt>Beta</dt><dd>{{ item.beta ?? isBeta() ? 'Yes' : 'No' }}</dd></div>
+      <div><dt>Archive status</dt><dd>{{ item.archived === null || item.archived === undefined ? 'Not supplied' : item.archived ? 'Archived' : 'Active' }}</dd></div>
+      @if (item.archivingReason) {
+        <div><dt>Archive reason</dt><dd>{{ item.archivingReason }}</dd></div>
+      }
+      <div><dt>Created</dt><dd>{{ formatTimestamp(item.createdOn) }}{{ item.createdBy ? ' by ' + item.createdBy : '' }}</dd></div>
+      <div><dt>Updated</dt><dd>{{ formatTimestamp(item.updatedOn) }}{{ item.updatedBy ? ' by ' + item.updatedBy : '' }}</dd></div>
       @if (item.releaseNotesUrl) {
         <div><dt>Release notes</dt><dd><a [href]="item.releaseNotesUrl" target="_blank" rel="noopener noreferrer">Open release notes</a></dd></div>
+      }
+      @if (isHttpsUrl(item.s3Uri)) {
+        <div><dt>Package archive</dt><dd><a [href]="item.s3Uri" target="_blank" rel="noopener noreferrer">Download package</a></dd></div>
+      }
+      @if (isHttpsUrl(item.firmwareUri)) {
+        <div><dt>Firmware image</dt><dd><a [href]="item.firmwareUri" target="_blank" rel="noopener noreferrer">Open firmware image</a></dd></div>
+      }
+      @if (isHttpsUrl(item.testReportUri)) {
+        <div><dt>Test report</dt><dd><a [href]="item.testReportUri" target="_blank" rel="noopener noreferrer">Open test report</a></dd></div>
       }
     </dl>
   }

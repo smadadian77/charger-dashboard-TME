@@ -197,7 +197,7 @@
                   <span class="fleet-jump-icon">
                     <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2"><path d="M6.3 20.3a2.4 2.4 0 0 0 3.4 0L12 18l-6-6-2.3 2.3a2.4 2.4 0 0 0 0 3.4z"/><path d="m2 22 3-3"/></svg>
                   </span>
-                  <input type="text" id="fleetDirectSerialInput" placeholder="Enter Serial (e.g. TACW2244723S0930)" autocomplete="off" spellcheck="false" />
+                  <input type="text" id="fleetDirectSerialInput" placeholder="Enter Serial (e.g. TACW2244723S0930)" autocomplete="off" autocapitalize="characters" spellcheck="false" />
                   <button type="button" id="fleetDirectJumpBtn" class="primary">
                     <span>Open</span>
                     <svg viewBox="0 0 24 24" width="11" height="11" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="9 18 15 12 9 6"/></svg>
@@ -317,7 +317,7 @@
               <span class="fleet-search-label">Search by</span>
               <div class="fleet-search-input-box">
                 <svg class="search-icon" viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
-                <input type="text" id="fleetSearchSerialInput" placeholder="Serial number" autocomplete="off" spellcheck="false" />
+                <input type="text" id="fleetSearchSerialInput" placeholder="Serial number" autocomplete="off" autocapitalize="characters" spellcheck="false" />
                 <button type="button" id="fleetClearSearchBtn" class="filter-clear-btn" hidden title="Clear search">✕</button>
               </div>
             </div>
@@ -427,7 +427,7 @@
                   <span>TOYOTA EV</span>
                 </span>
                 <span class="charger-env-tag" id="chargerEnvTag">PROD</span>
-                <input id="serialNumber" type="text" value="TACW2244723S0930" placeholder="Charger serial number..." autocomplete="off" spellcheck="false" aria-label="Charger serial number" />
+                <input id="serialNumber" type="text" value="TACW2244723S0930" placeholder="Charger serial number..." autocomplete="off" autocapitalize="characters" spellcheck="false" aria-label="Charger serial number" />
                 <span id="serialStatusBadge" class="serial-status-badge" hidden></span>
                 <button type="button" id="copySerial" class="serial-copy-btn" title="Copy charger serial number" aria-label="Copy charger serial number">
                   <span class="copy-btn-icon"><svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg></span>
@@ -1328,7 +1328,7 @@
           <div class="ops-bottom-left">
             <span class="ops-bottom-label">Quick Charger Investigation:</span>
             <div class="ops-jump-input-group">
-              <input type="text" id="opsDirectSerialInput" placeholder="Enter Serial Number (e.g. TACW2244723S0930)" autocomplete="off" spellcheck="false" />
+              <input type="text" id="opsDirectSerialInput" placeholder="Enter Serial Number (e.g. TACW2244723S0930)" autocomplete="off" autocapitalize="characters" spellcheck="false" />
               <button type="button" id="opsDirectJumpBtn" class="primary">
                 <span>Open Dashboard</span>
                 <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="9 18 15 12 9 6"/></svg>

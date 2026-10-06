@@ -23,7 +23,7 @@ describe('FotaBetaCampaignCreatePageComponent', () => {
             listPackages: () => of({
               ok: true,
               env: 'prod',
-              data: { content: [{ vendor: 'ChargeDot', model: 'Model A', version: '1.0', beta: true, isPushable: true }], totalElements: 1 }
+              data: { content: [{ vendor: 'ChargeDot', model: 'Model A', version: '1.0', beta: true, isPushable: true, approvalStatus: 'NOT_TESTED' }], totalElements: 1 }
             }),
             listWallboxes: () => of({
               ok: true,
@@ -53,7 +53,13 @@ describe('FotaBetaCampaignCreatePageComponent', () => {
 
     component.form.controls.model.setValue('Model A');
     expect(component.eligibleWallboxes().map((wallbox) => wallbox.serialNumber)).toEqual([serialNumber]);
+    expect(component.approvalStatus('1.0')).toBe('NOT_TESTED');
+    expect(component.approvalStatus('missing')).toBe('Not supplied');
+    component.selectEligibleWallboxes();
+    expect(component.form.controls.betaWallboxesList.value).toEqual([serialNumber]);
     component.form.controls.firmwareVersion.setValue('1.0');
+    component.clearWallboxSelection();
+    expect(component.form.controls.betaWallboxesList.value).toEqual([]);
     component.form.controls.betaWallboxesList.setValue([serialNumber]);
 
     expect(component.canCreate()).toBe(false);

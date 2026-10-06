@@ -49,6 +49,7 @@ const state = {
   },
   fleet: {
     items: [],
+    requestId: 0,
     page: 0,
     size: 10,
     totalPages: 0,
@@ -6524,7 +6525,9 @@ async function loadManufacturerData(serialNumber) {
 }
 
 async function fetchEvents() {
-  const serialNumber = document.getElementById('serialNumber').value.trim();
+  const serialInput = document.getElementById('serialNumber');
+  const serialNumber = window.dashboardSerialUtils.normalizeSerialNumber(serialInput.value);
+  serialInput.value = serialNumber;
   const token = String(state.token || '').replace(/^Bearer\s+/i, '').trim();
   const startTime = normalizeWindowValue(combineDateTime(
     document.getElementById('startDate').value,
@@ -6535,10 +6538,11 @@ async function fetchEvents() {
     document.getElementById('endTimeInput').value,
   ));
 
-  if (!serialNumber) {
-    setStatus('Please provide a serial number.', 'warning');
+  if (!window.dashboardSerialUtils.isValidChargerSerial(serialNumber)) {
+    setSerialFeedback(serialNumber ? 'Check the serial number format.' : 'Please provide a complete charger serial number.', true);
     return;
   }
+  setSerialFeedback('');
 
   void loadManufacturerData(serialNumber);
 
@@ -8515,7 +8519,8 @@ async function useCurrentMicrosoftSession() {
 
 function serialHistory() {
   try {
-    return JSON.parse(localStorage.getItem('chargerSerialHistory') || '[]');
+    const history = JSON.parse(localStorage.getItem('chargerSerialHistory') || '[]');
+    return Array.isArray(history) ? history : [];
   } catch (error) {
     return [];
   }
@@ -8572,10 +8577,13 @@ async function loadSerialHistoryFromServer() {
 }
 
 function rememberSerial(serialNumber) {
-  const clean = String(serialNumber || '').trim().toUpperCase();
-  if (!clean || clean.length < 5) return;
+  const utils = window.dashboardSerialUtils;
+  const clean = utils ? utils.normalizeSerialNumber(serialNumber) : String(serialNumber || '').trim().toUpperCase();
+  if (!utils?.isValidChargerSerial(clean)) return;
 
-  const currentHistory = serialHistory().filter((item) => item.toUpperCase() !== clean);
+  const currentHistory = serialHistory()
+    .map((item) => utils.normalizeSerialNumber(item))
+    .filter((item) => utils.isValidChargerSerial(item) && item !== clean);
   const next = [clean, ...currentHistory].slice(0, 30);
   try {
     localStorage.setItem('chargerSerialHistory', JSON.stringify(next));
@@ -8598,49 +8606,36 @@ function rememberSerial(serialNumber) {
 // ========================================================
 function getAllKnownSerials() {
   const serials = new Map();
+  const utils = window.dashboardSerialUtils;
+  if (!utils) return [];
 
   // 1. History
   serialHistory().forEach((s) => {
-    const clean = String(s || '').trim().toUpperCase();
-    if (clean) serials.set(clean, { serial: clean, model: 'Recent search', status: 'history' });
+    const clean = utils.normalizeSerialNumber(s);
+    if (utils.isValidChargerSerial(clean)) serials.set(clean, { serial: clean, model: 'Recent search', status: 'history' });
   });
 
   // 2. Fleet wallboxes (if loaded)
   if (Array.isArray(state.fleet?.items)) {
     state.fleet.items.forEach((c) => {
-      const s = String(c.serialNumber || c.serial || c.chargerId || '').trim().toUpperCase();
-      if (s) {
+      const s = utils.normalizeSerialNumber(c.serialNumber || c.serial || c.chargerId || '');
+      if (utils.isValidChargerSerial(s)) {
         serials.set(s, {
           serial: s,
           model: c.model || c.chargePointModel || 'Terra AC Wallbox',
-          status: String(c.connectivityStatus || c.status || 'online').toLowerCase(),
+          status: String(c.connectivityStatus || c.status || 'unknown').toLowerCase(),
         });
       }
     });
   }
 
-  // 3. Fallback active serials
-  const defaults = [
-    typeof SAMPLE !== 'undefined' && SAMPLE.serialNumber ? SAMPLE.serialNumber : 'TACW2244723S0930',
-    'TACW2244723S0931',
-    'TACW2244723S0929',
-    'TACW2244723S0928',
-    'TACW2244723S0932',
-  ];
-  defaults.forEach((s) => {
-    const clean = String(s || '').trim().toUpperCase();
-    if (clean && !serials.has(clean)) {
-      serials.set(clean, { serial: clean, model: 'Terra AC 22kW', status: 'online' });
-    }
-  });
-
   return Array.from(serials.values());
 }
 
 function removeSerialFromHistory(serialToRemove) {
-  const clean = String(serialToRemove || '').trim().toUpperCase();
+  const clean = window.dashboardSerialUtils?.normalizeSerialNumber(serialToRemove) || '';
   if (!clean) return;
-  const current = serialHistory().filter((s) => String(s).trim().toUpperCase() !== clean);
+  const current = serialHistory().filter((s) => window.dashboardSerialUtils.normalizeSerialNumber(s) !== clean);
   try {
     localStorage.setItem('chargerSerialHistory', JSON.stringify(current));
   } catch (e) {}
@@ -8654,50 +8649,7 @@ function clearAllSerialHistory() {
   updateSerialDatalist([]);
 }
 
-function levenshteinDistance(s1, s2) {
-  const a = String(s1 || '').toUpperCase();
-  const b = String(s2 || '').toUpperCase();
-  if (a === b) return 0;
-  if (!a.length) return b.length;
-  if (!b.length) return a.length;
-  const matrix = Array.from({ length: b.length + 1 }, (_, i) => [i]);
-  for (let j = 0; j <= a.length; j++) matrix[0][j] = j;
-  for (let i = 1; i <= b.length; i++) {
-    for (let j = 1; j <= a.length; j++) {
-      const cost = b.charAt(i - 1) === a.charAt(j - 1) ? 0 : 1;
-      matrix[i][j] = Math.min(
-        matrix[i - 1][j] + 1,
-        matrix[i][j - 1] + 1,
-        matrix[i - 1][j - 1] + cost
-      );
-    }
-  }
-  return matrix[b.length][a.length];
-}
-
-function findBestTypoMatch(query, candidates) {
-  const q = String(query || '').trim().toUpperCase();
-  if (q.length < 3) return null;
-  let best = null;
-  let minDistance = Infinity;
-  for (const item of candidates) {
-    const s = item.serial.toUpperCase();
-    if (s === q) return null; // Exact match, not a typo
-    let dist = levenshteinDistance(q, s);
-    // If user forgot prefix 'TACW'
-    if (s.endsWith(q) && Math.abs(s.length - q.length) <= 5) {
-      dist = 1;
-    }
-    const maxTol = q.length <= 6 ? 2 : q.length <= 10 ? 3 : 5;
-    if (dist < minDistance && dist <= maxTol) {
-      minDistance = dist;
-      best = item.serial;
-    }
-  }
-  return best;
-}
-
-function attachSmartSerialSearch(inputElement, onSelectCallback) {
+function attachSmartSerialSearch(inputElement, onSelectCallback, { allowPartial = false } = {}) {
   if (!inputElement) return;
 
   // Clean up any legacy typo banner in DOM
@@ -8714,6 +8666,13 @@ function attachSmartSerialSearch(inputElement, onSelectCallback) {
     container.hidden = true;
     inputElement.parentElement.appendChild(container);
   }
+  if (!container.id) container.id = `${inputElement.id}-serial-suggestions`;
+  container.setAttribute('role', 'listbox');
+  inputElement.setAttribute('role', 'combobox');
+  inputElement.setAttribute('aria-autocomplete', 'list');
+  inputElement.setAttribute('aria-haspopup', 'listbox');
+  inputElement.setAttribute('aria-controls', container.id);
+  inputElement.setAttribute('aria-expanded', 'false');
   inputElement.parentElement.style.position = 'relative';
 
   let selectedIndex = -1;
@@ -8722,14 +8681,17 @@ function attachSmartSerialSearch(inputElement, onSelectCallback) {
     container.hidden = true;
     container.innerHTML = '';
     selectedIndex = -1;
+    inputElement.setAttribute('aria-expanded', 'false');
+    inputElement.removeAttribute('aria-activedescendant');
   }
 
   function selectValue(serial) {
-    const s = String(serial || '').trim().toUpperCase();
-    if (!s) return;
+    const utils = window.dashboardSerialUtils;
+    const s = utils.normalizeSerialNumber(serial);
+    if (!utils.isValidChargerSerial(s)) return;
     inputElement.value = s;
     closeDropdown();
-    rememberSerial(s);
+    if (window.dashboardSerialUtils?.isValidChargerSerial(s)) rememberSerial(s);
     if (typeof onSelectCallback === 'function') {
       onSelectCallback(s);
     }
@@ -8774,7 +8736,10 @@ function attachSmartSerialSearch(inputElement, onSelectCallback) {
   }
 
   function renderRecentHistory() {
-    const historyList = serialHistory().slice(0, 8);
+    const utils = window.dashboardSerialUtils;
+    const historyList = [...new Set(serialHistory()
+      .map((item) => utils.normalizeSerialNumber(item))
+      .filter((item) => utils.isValidChargerSerial(item)))].slice(0, 8);
     if (!historyList.length) {
       const all = getAllKnownSerials().filter((it) => it.status !== 'history').slice(0, 5);
       if (!all.length) {
@@ -8783,12 +8748,12 @@ function attachSmartSerialSearch(inputElement, onSelectCallback) {
       }
       container.innerHTML = `
         <div class="smart-serial-section-header">
-          <span>Available Chargers</span>
+          <span>Loaded Chargers</span>
         </div>
         ${all.map((item, idx) => `
-          <div class="smart-serial-item ${idx === selectedIndex ? 'is-selected' : ''}" data-serial="${escapeHtml(item.serial)}">
+          <div id="${inputElement.id}-serial-option-${idx}" class="smart-serial-item ${idx === selectedIndex ? 'is-selected' : ''}" role="option" aria-selected="${idx === selectedIndex}" data-serial="${escapeHtml(item.serial)}">
             <div class="smart-serial-item-left">
-              <span class="smart-serial-dot ${item.status === 'offline' ? 'offline' : 'online'}"></span>
+              <span class="smart-serial-dot ${serialStatusTone(item.status)}"></span>
               <strong class="smart-serial-code">${escapeHtml(item.serial)}</strong>
             </div>
             <span class="smart-serial-meta">${escapeHtml(item.model || '')}</span>
@@ -8802,7 +8767,7 @@ function attachSmartSerialSearch(inputElement, onSelectCallback) {
           <button type="button" class="smart-serial-clear-btn" title="Clear all recent searches">Clear all</button>
         </div>
         ${historyList.map((s, idx) => `
-          <div class="smart-serial-item ${idx === selectedIndex ? 'is-selected' : ''}" data-serial="${escapeHtml(s)}">
+          <div id="${inputElement.id}-serial-option-${idx}" class="smart-serial-item ${idx === selectedIndex ? 'is-selected' : ''}" role="option" aria-selected="${idx === selectedIndex}" data-serial="${escapeHtml(s)}">
             <div class="smart-serial-item-left">
               <svg class="smart-serial-history-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
               <strong class="smart-serial-code">${escapeHtml(s)}</strong>
@@ -8816,32 +8781,25 @@ function attachSmartSerialSearch(inputElement, onSelectCallback) {
       `;
     }
     container.hidden = false;
+    inputElement.setAttribute('aria-expanded', 'true');
     bindDropdownActions();
   }
 
   function renderSuggestions(query) {
-    const q = String(query || '').trim().toUpperCase();
+    selectedIndex = -1;
+    const utils = window.dashboardSerialUtils;
+    const q = utils.normalizeSerialNumber(query);
     if (!q) {
       renderRecentHistory();
       return;
     }
 
     const all = getAllKnownSerials();
-    const exact = [];
-    const prefix = [];
-    const contains = [];
-
-    all.forEach((item) => {
-      const s = item.serial.toUpperCase();
-      if (s === q) exact.push(item);
-      else if (s.startsWith(q)) prefix.push(item);
-      else if (s.includes(q)) contains.push(item);
-    });
-
-    const matches = [...exact, ...prefix, ...contains].slice(0, 8);
+    const suggestions = utils.findSerialSuggestions(q, all, 8);
+    const matches = suggestions.matches;
 
     if (!matches.length) {
-      const typo = findBestTypoMatch(q, all);
+      const typo = suggestions.typo?.serial;
       if (typo) {
         container.innerHTML = `
           <div class="smart-serial-typo-notice">
@@ -8856,14 +8814,16 @@ function attachSmartSerialSearch(inputElement, onSelectCallback) {
           </div>
         `;
         container.hidden = false;
+        inputElement.setAttribute('aria-expanded', 'true');
       } else {
         container.innerHTML = `
           <div class="smart-serial-empty">
             <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
-            <span>No charger found matching "${escapeHtml(q)}"</span>
+            <span>${q.length < 3 ? 'Type at least 3 characters to search.' : `No loaded charger matches "${escapeHtml(q)}".`}</span>
           </div>
         `;
         container.hidden = false;
+        inputElement.setAttribute('aria-expanded', 'true');
       }
       bindDropdownActions();
       return;
@@ -8874,10 +8834,9 @@ function attachSmartSerialSearch(inputElement, onSelectCallback) {
         <span>Matching Chargers</span>
       </div>
       ${matches.map((item, idx) => {
-        const isOnline = item.status === 'online' || item.status === 'history';
-        const statusDot = `<span class="smart-serial-dot ${isOnline ? 'online' : 'offline'}"></span>`;
+        const statusDot = `<span class="smart-serial-dot ${serialStatusTone(item.status)}"></span>`;
         return `
-          <div class="smart-serial-item ${idx === selectedIndex ? 'is-selected' : ''}" data-serial="${escapeHtml(item.serial)}">
+          <div id="${inputElement.id}-serial-option-${idx}" class="smart-serial-item ${idx === selectedIndex ? 'is-selected' : ''}" role="option" aria-selected="${idx === selectedIndex}" data-serial="${escapeHtml(item.serial)}">
             <div class="smart-serial-item-left">
               ${statusDot}
               <strong class="smart-serial-code">${escapeHtml(item.serial)}</strong>
@@ -8889,6 +8848,7 @@ function attachSmartSerialSearch(inputElement, onSelectCallback) {
     `;
 
     container.hidden = false;
+    inputElement.setAttribute('aria-expanded', 'true');
     bindDropdownActions();
   }
 
@@ -8901,6 +8861,8 @@ function attachSmartSerialSearch(inputElement, onSelectCallback) {
   });
 
   inputElement.addEventListener('input', () => {
+    if (inputElement.id === 'serialNumber') setSerialFeedback('');
+    else setSerialLookupError(inputElement, '');
     renderSuggestions(inputElement.value);
   });
 
@@ -8910,13 +8872,21 @@ function attachSmartSerialSearch(inputElement, onSelectCallback) {
       if (e.key === 'ArrowDown') {
         e.preventDefault();
         selectedIndex = (selectedIndex + 1) % items.length;
-        items.forEach((it, i) => it.classList.toggle('is-selected', i === selectedIndex));
+        items.forEach((it, i) => {
+          it.classList.toggle('is-selected', i === selectedIndex);
+          it.setAttribute('aria-selected', String(i === selectedIndex));
+        });
+        inputElement.setAttribute('aria-activedescendant', items[selectedIndex].id);
         return;
       }
       if (e.key === 'ArrowUp') {
         e.preventDefault();
         selectedIndex = (selectedIndex - 1 + items.length) % items.length;
-        items.forEach((it, i) => it.classList.toggle('is-selected', i === selectedIndex));
+        items.forEach((it, i) => {
+          it.classList.toggle('is-selected', i === selectedIndex);
+          it.setAttribute('aria-selected', String(i === selectedIndex));
+        });
+        inputElement.setAttribute('aria-activedescendant', items[selectedIndex].id);
         return;
       }
       if (e.key === 'Enter') {
@@ -8933,31 +8903,23 @@ function attachSmartSerialSearch(inputElement, onSelectCallback) {
     }
 
     if (e.key === 'Enter') {
-      const suggestBtn = container.querySelector('.smart-serial-suggest-btn');
-      if (!container.hidden && suggestBtn) {
+      if (!container.hidden && container.querySelector('.smart-serial-suggest-btn')) {
         e.preventDefault();
-        const typo = suggestBtn.dataset.serial;
-        if (typo) {
-          selectValue(typo);
-          return;
-        }
+        return;
       }
 
-      const val = inputElement.value.trim().toUpperCase();
-      const all = getAllKnownSerials();
-      const exactMatch = all.find((it) => it.serial.toUpperCase() === val);
-      if (!exactMatch && val) {
-        const typo = findBestTypoMatch(val, all);
-        if (typo) {
-          e.preventDefault();
-          renderSuggestions(val);
-          return;
-        }
+      const utils = window.dashboardSerialUtils;
+      const val = utils.normalizeSerialNumber(inputElement.value);
+      if (!val || (!allowPartial && !utils.isValidChargerSerial(val))) {
+        e.preventDefault();
+        renderSuggestions(val);
+        if (inputElement.id === 'serialNumber') setSerialFeedback('Check the serial number format.', true);
+        else setSerialLookupError(inputElement, 'Enter a complete charger serial number.');
+        return;
       }
       closeDropdown();
-      if (val) {
-        selectValue(val);
-      }
+      inputElement.value = val;
+      selectValue(val);
     }
 
     if (e.key === 'Escape') {
@@ -8972,6 +8934,33 @@ function attachSmartSerialSearch(inputElement, onSelectCallback) {
 
 function renderSerialHistory() {
   // Legacy stub maintained for compatibility
+}
+
+function serialStatusTone(status) {
+  const value = String(status || '').toLowerCase();
+  if (value === 'history') return 'unknown';
+  if (/online|available|connected|active/.test(value)) return 'online';
+  if (/offline|disconnected|unavailable|faulted|blacklisted/.test(value)) return 'offline';
+  return 'unknown';
+}
+
+function setSerialLookupError(input, message) {
+  if (!input || input.id === 'fleetSearchSerialInput') return;
+  const host = input.parentElement?.parentElement;
+  if (!host) return;
+  let feedback = host.querySelector('.serial-lookup-feedback');
+  if (!feedback) {
+    feedback = document.createElement('p');
+    feedback.className = 'serial-lookup-feedback';
+    feedback.setAttribute('role', 'status');
+    feedback.setAttribute('aria-live', 'polite');
+    feedback.hidden = true;
+    input.parentElement.insertAdjacentElement('afterend', feedback);
+  }
+  feedback.textContent = message;
+  feedback.hidden = !message;
+  if (message) input.setAttribute('aria-invalid', 'true');
+  else input.removeAttribute('aria-invalid');
 }
 
 function setSerialFeedback(message, invalid = false) {
@@ -8993,22 +8982,20 @@ function setSerialFeedback(message, invalid = false) {
 function scheduleSerialSearch(delay = 700) {
   const input = document.getElementById('serialNumber');
   const menu = document.getElementById('serialHistory');
-  const serialNumber = input.value.trim();
+  const serialNumber = window.dashboardSerialUtils.normalizeSerialNumber(input.value);
+  input.value = serialNumber;
   window.clearTimeout(state.serialSearchTimer);
   state.serialSearchTimer = null;
   setSerialFeedback('');
 
-  if (serialNumber.length < 14) {
-    return;
-  }
-  if (!/^TACW[A-Z0-9]{10,12}$/i.test(serialNumber)) {
+  if (!window.dashboardSerialUtils.isValidChargerSerial(serialNumber)) {
     setSerialFeedback('Check the serial number format.', true);
     return;
   }
 
   state.serialSearchTimer = window.setTimeout(() => {
     state.serialSearchTimer = null;
-    if (input.value.trim().toUpperCase() !== serialNumber.toUpperCase()) {
+    if (window.dashboardSerialUtils.normalizeSerialNumber(input.value) !== serialNumber) {
       return;
     }
     menu.hidden = true;
@@ -9220,7 +9207,9 @@ function formatCountryName(countryCode) {
 
 function openChargerDashboard(serialNumber) {
   if (!serialNumber) return;
-  const serial = serialNumber.trim().toUpperCase();
+  const utils = window.dashboardSerialUtils;
+  const serial = utils ? utils.normalizeSerialNumber(serialNumber) : String(serialNumber).trim().toUpperCase();
+  if (!utils?.isValidChargerSerial(serial)) return;
   state.currentView = 'charger';
 
   const fleetView = document.getElementById('fleetView');
@@ -11433,6 +11422,7 @@ function setupOutagesControls() {
 }
 
 async function fetchFleetWallboxes(page = 0) {
+  const requestId = ++state.fleet.requestId;
   state.fleet.page = page;
   state.fleet.loading = true;
   state.fleet.error = null;
@@ -11452,7 +11442,7 @@ async function fetchFleetWallboxes(page = 0) {
   const size = parseInt(document.getElementById('fleetPageSizeSelect')?.value, 10) || 10;
   state.fleet.size = size;
 
-  const serialNumber = document.getElementById('fleetSearchSerialInput')?.value.trim() || '';
+  const serialNumber = window.dashboardSerialUtils.normalizeSerialNumber(document.getElementById('fleetSearchSerialInput')?.value || '');
   const model = document.getElementById('fleetModelSelect')?.value || '';
   const firmwareVersion = document.getElementById('fleetVersionSelect')?.value || '';
   const status = document.getElementById('fleetStatusSelect')?.value || '';
@@ -11477,7 +11467,7 @@ async function fetchFleetWallboxes(page = 0) {
   try {
     const res = await fetch(dashboardApiUrl(`/api/wallbox-list?${params.toString()}`));
     const data = await res.json();
-    if (env !== state.currentEnv) return;
+    if (requestId !== state.fleet.requestId || env !== state.currentEnv) return;
 
     if (!data || !data.ok) {
       if (res.status === 401 || data?.authError) {
@@ -11501,7 +11491,7 @@ async function fetchFleetWallboxes(page = 0) {
     renderFleetTableRows(content);
     updateFleetPagination(page, size, totalElements, totalPages);
   } catch (err) {
-    if (env !== state.currentEnv) return;
+    if (requestId !== state.fleet.requestId || env !== state.currentEnv) return;
     state.fleet.error = err.message;
     state.fleet.totalElements = null;
     state.fleet.totalEnvironment = env;
@@ -11518,7 +11508,7 @@ async function fetchFleetWallboxes(page = 0) {
       `;
     }
   } finally {
-    if (env === state.currentEnv) state.fleet.loading = false;
+    if (requestId === state.fleet.requestId && env === state.currentEnv) state.fleet.loading = false;
   }
 }
 
@@ -12494,16 +12484,17 @@ async function startDashboardApp() {
   const opsDirectSerialInput = document.getElementById('opsDirectSerialInput');
   const opsDirectJumpBtn = document.getElementById('opsDirectJumpBtn');
   const handleOpsDirectJump = () => {
-    let val = opsDirectSerialInput ? opsDirectSerialInput.value.trim().toUpperCase() : '';
-    const suggestBtn = opsDirectSerialInput?.parentElement?.querySelector('.smart-serial-suggest-btn');
-    if (suggestBtn && suggestBtn.dataset.serial) {
-      val = suggestBtn.dataset.serial;
-      opsDirectSerialInput.value = val;
+    const utils = window.dashboardSerialUtils;
+    const val = utils.normalizeSerialNumber(opsDirectSerialInput?.value || '');
+    if (opsDirectSerialInput) opsDirectSerialInput.value = val;
+    if (!utils.isValidChargerSerial(val)) {
+      setSerialLookupError(opsDirectSerialInput, 'Enter a complete charger serial number.');
+      opsDirectSerialInput?.focus();
+      return;
     }
-    if (val) {
-      rememberSerial(val);
-      openChargerDashboard(val);
-    }
+    setSerialLookupError(opsDirectSerialInput, '');
+    rememberSerial(val);
+    openChargerDashboard(val);
   };
   if (opsDirectJumpBtn) opsDirectJumpBtn.addEventListener('click', handleOpsDirectJump);
 
@@ -12526,16 +12517,17 @@ async function startDashboardApp() {
   const directSerialInput = document.getElementById('fleetDirectSerialInput');
   const directJumpBtn = document.getElementById('fleetDirectJumpBtn');
   const handleDirectJump = () => {
-    let val = directSerialInput ? directSerialInput.value.trim().toUpperCase() : '';
-    const suggestBtn = directSerialInput?.parentElement?.querySelector('.smart-serial-suggest-btn');
-    if (suggestBtn && suggestBtn.dataset.serial) {
-      val = suggestBtn.dataset.serial;
-      directSerialInput.value = val;
+    const utils = window.dashboardSerialUtils;
+    const val = utils.normalizeSerialNumber(directSerialInput?.value || '');
+    if (directSerialInput) directSerialInput.value = val;
+    if (!utils.isValidChargerSerial(val)) {
+      setSerialLookupError(directSerialInput, 'Enter a complete charger serial number.');
+      directSerialInput?.focus();
+      return;
     }
-    if (val) {
-      rememberSerial(val);
-      openChargerDashboard(val);
-    }
+    setSerialLookupError(directSerialInput, '');
+    rememberSerial(val);
+    openChargerDashboard(val);
   };
   if (directJumpBtn) directJumpBtn.addEventListener('click', handleDirectJump);
   if (directSerialInput) {
@@ -12673,7 +12665,7 @@ async function startDashboardApp() {
     const clearBtn = document.getElementById('fleetClearSearchBtn');
     if (clearBtn) clearBtn.hidden = !serial;
     fetchFleetWallboxes(0);
-  });
+  }, { allowPartial: true });
   attachSmartSerialSearch(document.getElementById('opsDirectSerialInput'), (serial) => {
     openChargerDashboard(serial);
   });

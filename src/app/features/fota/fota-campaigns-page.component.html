@@ -26,8 +26,11 @@
             <th scope="col">FOTA Campaign ID</th>
             <th scope="col">Charger Model</th>
             <th scope="col">Firmware Version</th>
+            <th scope="col">Country</th>
             <th scope="col">Target Chargers</th>
+            <th scope="col">Target Outcomes</th>
             <th scope="col">Campaign Status</th>
+            <th scope="col">Details</th>
           </tr>
         </thead>
         <tbody>
@@ -36,8 +39,11 @@
               <td class="fota-mono">{{ campaign.campaignId }}</td>
               <td>{{ campaign.chargerModel }}</td>
               <td>{{ campaign.firmwareVersion }}</td>
+              <td>{{ campaign.countryId || 'Pan-European / not supplied' }}</td>
               <td class="fota-targets">{{ targetSummary(campaign) }}</td>
+              <td>{{ targetStatusSummary(campaign) }}</td>
               <td>{{ campaign.overallCampaignStatus || 'Not supplied' }}</td>
+              <td><button class="fota-secondary-button" type="button" (click)="openDetails(campaign)">Details</button></td>
             </tr>
           }
         </tbody>
@@ -60,3 +66,42 @@
     </nav>
   }
 </section>
+
+<dialog #campaignDetails class="fota-detail-dialog" aria-labelledby="campaignDetailHeading">
+  <header class="fota-detail-heading">
+    <h2 id="campaignDetailHeading">Campaign details</h2>
+    <button class="fota-icon-button" type="button" aria-label="Close campaign details" (click)="closeDetails()">Close</button>
+  </header>
+  @if (selectedCampaign(); as campaign) {
+    <dl class="fota-detail-list">
+      <div><dt>Campaign ID</dt><dd class="fota-mono">{{ campaign.campaignId }}</dd></div>
+      <div><dt>Track</dt><dd>{{ campaign.beta ? 'Beta' : 'Stable' }}</dd></div>
+      <div><dt>Status</dt><dd>{{ campaign.overallCampaignStatus || 'Not supplied' }}</dd></div>
+      <div><dt>Country</dt><dd>{{ campaign.countryId || 'Pan-European / not supplied' }}</dd></div>
+      <div><dt>Parent campaign</dt><dd class="fota-mono">{{ campaign.parent || 'None' }}</dd></div>
+      <div><dt>Created</dt><dd>{{ formatTimestamp(campaign.createdOn) }}{{ campaign.createdBy ? ' by ' + campaign.createdBy : '' }}</dd></div>
+      <div><dt>Updated</dt><dd>{{ formatTimestamp(campaign.updatedOn) }}{{ campaign.updatedBy ? ' by ' + campaign.updatedBy : '' }}</dd></div>
+    </dl>
+    @if (campaign.children?.length) {
+      <h3 class="fota-detail-subheading">Child campaigns</h3>
+      <ul class="fota-detail-values">
+        @for (child of campaign.children; track child) { <li class="fota-mono">{{ child }}</li> }
+      </ul>
+    }
+    <h3 class="fota-detail-subheading">Target chargers</h3>
+    @if (campaign.serialNumbers?.length) {
+      <div class="fota-table-scroll">
+        <table class="fota-table">
+          <thead><tr><th scope="col">Serial number</th><th scope="col">Firmware status</th></tr></thead>
+          <tbody>
+            @for (target of campaign.serialNumbers; track target.serialNumber) {
+              <tr><td class="fota-mono">{{ target.serialNumber }}</td><td>{{ target.status || 'Not supplied' }}</td></tr>
+            }
+          </tbody>
+        </table>
+      </div>
+    } @else {
+      <p class="fota-state">No target-level status is present in this campaign record.</p>
+    }
+  }
+</dialog>

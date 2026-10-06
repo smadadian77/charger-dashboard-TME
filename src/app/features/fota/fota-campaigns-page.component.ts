@@ -1,5 +1,5 @@
 import { HttpErrorResponse } from '@angular/common/http';
-import { Component, DestroyRef, OnInit, computed, inject, signal } from '@angular/core';
+import { Component, DestroyRef, ElementRef, OnInit, ViewChild, computed, inject, signal } from '@angular/core';
 import { takeUntilDestroyed, toSignal } from '@angular/core/rxjs-interop';
 import { ActivatedRoute, RouterLink } from '@angular/router';
 import { BehaviorSubject, EMPTY, combineLatest, catchError, finalize, switchMap, tap } from 'rxjs';
@@ -32,10 +32,13 @@ export class FotaCampaignsPageComponent implements OnInit {
   readonly totalItems = signal(0);
   readonly loading = signal(true);
   readonly error = signal<string | null>(null);
+  readonly selectedCampaign = signal<FotaCampaign | null>(null);
   readonly pageCount = computed(() => Math.max(1, Math.ceil(this.totalItems() / this.queryState().size)));
   readonly currentPage = computed(() => this.queryState().page + 1);
   readonly rangeStart = computed(() => this.totalItems() === 0 ? 0 : this.queryState().page * this.queryState().size + 1);
   readonly rangeEnd = computed(() => Math.min((this.queryState().page + 1) * this.queryState().size, this.totalItems()));
+
+  @ViewChild('campaignDetails') private campaignDetails?: ElementRef<HTMLDialogElement>;
 
   ngOnInit(): void {
     this.route.data.pipe(takeUntilDestroyed(this.destroyRef)).subscribe((data) => {
@@ -83,6 +86,31 @@ export class FotaCampaignsPageComponent implements OnInit {
     const targets = campaign.serialNumbers ?? [];
     const serialNumbers = targets.map((target) => target.serialNumber).filter(Boolean);
     return serialNumbers.length ? serialNumbers.join(', ') : 'No target chargers';
+  }
+
+  targetStatusSummary(campaign: FotaCampaign): string {
+    const counts = (campaign.serialNumbers ?? []).reduce<Record<string, number>>((result, target) => {
+      const status = target.status || 'Not supplied';
+      result[status] = (result[status] ?? 0) + 1;
+      return result;
+    }, {});
+    return Object.entries(counts).map(([status, count]) => `${status}: ${count}`).join(', ') || 'Not supplied';
+  }
+
+  openDetails(campaign: FotaCampaign): void {
+    this.selectedCampaign.set(campaign);
+    this.campaignDetails?.nativeElement.showModal();
+  }
+
+  closeDetails(): void {
+    this.campaignDetails?.nativeElement.close();
+    this.selectedCampaign.set(null);
+  }
+
+  formatTimestamp(value: string | null | undefined): string {
+    if (!value) return 'Not supplied';
+    const date = new Date(value);
+    return Number.isNaN(date.getTime()) ? value : date.toLocaleString();
   }
 
   private errorMessage(error: unknown): string {

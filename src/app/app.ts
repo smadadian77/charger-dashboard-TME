@@ -1,11 +1,17 @@
 import { Component, AfterViewInit } from '@angular/core';
 import { RouterOutlet } from '@angular/router';
 import { initializeDashboardWhenReady } from './dashboard-bootstrap';
+import { findSerialSuggestions, isValidChargerSerial, normalizeSerialNumber } from './serial-number-utils';
 
 declare global {
   interface Window {
     initToyotaDashboard?: () => void;
     initToyotaDashboardHeader?: () => void;
+    dashboardSerialUtils?: {
+      findSerialSuggestions: typeof findSerialSuggestions;
+      isValidChargerSerial: typeof isValidChargerSerial;
+      normalizeSerialNumber: typeof normalizeSerialNumber;
+    };
   }
 }
 
@@ -21,6 +27,7 @@ export class App implements AfterViewInit {
   readonly currentPath = window.location.pathname;
 
   ngAfterViewInit(): void {
+    window.dashboardSerialUtils = { findSerialSuggestions, isValidChargerSerial, normalizeSerialNumber };
     const script = document.createElement('script');
     script.src = `/dashboard-engine.js?v=${Date.now()}`;
     script.async = true;

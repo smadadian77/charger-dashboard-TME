@@ -411,6 +411,21 @@ class TokenRouteTests(unittest.TestCase):
         self.assertEqual(payload["data"], matrix["data"])
         get_matrix.assert_called_once_with("acc", "synthetic-fota-token")
 
+    def test_fota_package_route_preserves_unassigned_campaign_filter(self):
+        packages = {"data": {"content": [], "totalElements": 0}}
+        with patch("server.read_saved_token", return_value="synthetic-fota-token"), \
+                patch("server.list_packages", return_value=packages) as list_packages:
+            status, _ = self.request_json(
+                "GET",
+                "/api/fota/packages?env=prev&page=0&size=100&beta=false&isPushable=true&unassignedCampaign=true",
+            )
+
+        self.assertEqual(status, 200)
+        list_packages.assert_called_once_with(
+            "prev", "synthetic-fota-token", "0", "100", False,
+            {"isPushable": True, "unassignedCampaign": True},
+        )
+
 
 if __name__ == "__main__":
     unittest.main()

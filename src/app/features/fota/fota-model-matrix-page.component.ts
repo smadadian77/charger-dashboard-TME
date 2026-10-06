@@ -1,5 +1,5 @@
 import { HttpErrorResponse } from '@angular/common/http';
-import { ChangeDetectionStrategy, Component, DestroyRef, OnInit, inject, signal } from '@angular/core';
+import { ChangeDetectionStrategy, Component, DestroyRef, OnInit, computed, inject, signal } from '@angular/core';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import { EMPTY, catchError, finalize, switchMap, tap } from 'rxjs';
 import { FotaApiService } from './fota-api.service';
@@ -17,8 +17,21 @@ export class FotaModelMatrixPageComponent implements OnInit {
   private readonly destroyRef = inject(DestroyRef);
 
   readonly rows = signal<FotaModelMatrixRow[]>([]);
+  readonly search = signal('');
   readonly loading = signal(true);
   readonly error = signal<string | null>(null);
+  readonly filteredRows = computed(() => {
+    const query = this.search().trim().toLocaleLowerCase();
+    if (!query) return this.rows();
+    return this.rows().filter((row) => [
+      row.modelName,
+      row.hardwareVersion,
+      row.vendor,
+      ...Object.entries(row.versionBinMap ?? {}).flat()
+    ].some((value) => String(value ?? '').toLocaleLowerCase().includes(query)));
+  });
+  readonly mappingCount = computed(() => this.filteredRows()
+    .reduce((count, row) => count + Object.keys(row.versionBinMap ?? {}).length, 0));
 
   ngOnInit(): void {
     this.environment.current$
@@ -43,6 +56,10 @@ export class FotaModelMatrixPageComponent implements OnInit {
 
   versions(row: FotaModelMatrixRow): Array<{ version: string; filename: string }> {
     return Object.entries(row.versionBinMap ?? {}).map(([version, filename]) => ({ version, filename }));
+  }
+
+  setSearch(event: Event): void {
+    this.search.set((event.target as HTMLInputElement).value);
   }
 
   private errorMessage(error: unknown): string {

@@ -38,6 +38,20 @@ describe('FotaCampaignCreatePageComponent', () => {
               env: 'prod',
               data: { countries: { data: { countries: [{ countryId: 'BE' }] } } }
             }),
+            listLaunchedCampaigns: () => of({
+              ok: true,
+              env: 'prod',
+              data: {
+                launchedCampaignsList: [{
+                  campaignId: 'campaign-1',
+                  firmwareVersion: '1.0',
+                  overallCampaignStatus: 'NotCompleted',
+                  isPushable: true,
+                  parent: 'campaign-parent',
+                  children: ['campaign-child']
+                }]
+              }
+            }),
             executeConfiguredMutation: () => {
               mutationCalls += 1;
               return of({ ok: true });
@@ -88,5 +102,19 @@ describe('FotaCampaignCreatePageComponent', () => {
 
     component.createCampaign();
     expect(mutationCalls).toBe(0);
+  });
+
+  it('summarizes launched-campaign pushability and lineage from the API fields', () => {
+    const component = fixture.componentInstance;
+    const campaign = {
+      campaignId: 'campaign-1',
+      firmwareVersion: '1.0',
+      isPushable: true,
+      parent: 'campaign-parent',
+      children: ['campaign-child']
+    };
+
+    expect(component.pushability(campaign)).toBe('Pushable');
+    expect(component.campaignLineage(campaign)).toBe('Parent: campaign-parent / Children: campaign-child');
   });
 });

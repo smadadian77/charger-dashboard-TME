@@ -207,6 +207,16 @@ export class FotaPackagesPageComponent implements OnInit {
     return `${item.vendor ?? ''}:${item.model}:${item.version}:${item.beta ?? false}`;
   }
 
+  isHttpsUrl(value: string | null | undefined): value is string {
+    return typeof value === 'string' && /^https:\/\//i.test(value);
+  }
+
+  formatTimestamp(value: string | null | undefined): string {
+    if (!value) return 'Not supplied';
+    const date = new Date(value);
+    return Number.isNaN(date.getTime()) ? value : date.toLocaleString();
+  }
+
   private errorMessage(error: unknown): string {
     if (error instanceof HttpErrorResponse && error.status === 401) {
       return 'No valid saved session is available for this environment.';

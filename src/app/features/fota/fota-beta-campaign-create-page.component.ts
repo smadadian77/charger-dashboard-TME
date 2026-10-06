@@ -111,6 +111,20 @@ export class FotaBetaCampaignCreatePageComponent implements OnInit {
     return this.form.controls.betaWallboxesList.value.includes(serialNumber);
   }
 
+  approvalStatus(version: string): string {
+    return this.packages().find((item) =>
+      item.model === this.selectedModel() && item.version === version && item.beta
+    )?.approvalStatus || 'Not supplied';
+  }
+
+  selectEligibleWallboxes(): void {
+    this.form.controls.betaWallboxesList.setValue(this.eligibleWallboxes().map((item) => item.serialNumber));
+  }
+
+  clearWallboxSelection(): void {
+    this.form.controls.betaWallboxesList.setValue([]);
+  }
+
   canCreate(): boolean {
     const value = this.form.getRawValue();
     return Boolean(

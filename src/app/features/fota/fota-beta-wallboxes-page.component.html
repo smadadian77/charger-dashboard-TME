@@ -15,7 +15,7 @@
     <form class="fota-membership-form" [formGroup]="membershipForm" (ngSubmit)="checkMembership()">
       <label>
         <span>Serial number</span>
-        <input formControlName="serialNumber" type="text" autocomplete="off" spellcheck="false" placeholder="Enter serial number" />
+        <input formControlName="serialNumber" type="text" autocomplete="off" spellcheck="false" autocapitalize="characters" placeholder="Enter serial number" />
       </label>
       <button class="fota-primary-button" type="submit" [disabled]="membershipLoading()">
         {{ membershipLoading() ? 'Checking...' : 'Check' }}
@@ -39,7 +39,7 @@
   <form class="fota-filter-bar" [formGroup]="filters" (ngSubmit)="applyFilters()">
     <label>
       <span>Serial number</span>
-      <input type="search" formControlName="serialNumber" placeholder="Filter serial" />
+      <input type="search" formControlName="serialNumber" autocomplete="off" spellcheck="false" autocapitalize="characters" placeholder="Filter serial" />
     </label>
     <label>
       <span>Model</span>
@@ -92,9 +92,10 @@
             <th scope="col">Serial Number</th>
             <th scope="col">Model</th>
             <th scope="col">Version</th>
-            <th scope="col">Status</th>
+            <th scope="col">Connector status</th>
             <th scope="col">Country</th>
             <th scope="col">Beta pool</th>
+            <th scope="col">Details</th>
           </tr>
         </thead>
         <tbody>
@@ -103,13 +104,14 @@
               <td class="fota-mono">{{ item.serialNumber }}</td>
               <td>{{ item.model || 'N/A' }}</td>
               <td>{{ item.version || 'N/A' }}</td>
-              <td><span class="fota-status" [class.is-disconnected]="item.connectors?.[0]?.status === 'Disconnected'">{{ item.connectors?.[0]?.status || 'N/A' }}</span></td>
+              <td>{{ connectorSummary(item) }}</td>
               <td>{{ displayCountry(item.countryId) }}</td>
               <td>
                 <button class="fota-secondary-button" type="button" [disabled]="!mutationCapabilities()?.enabled" [attr.title]="mutationCapabilities()?.enabled ? 'Change beta-pool membership' : 'Mutation target is not configured'" (click)="requestPoolMutation(item)">
                   {{ item.beta ? 'Remove' : 'Add' }}
                 </button>
               </td>
+              <td><button class="fota-secondary-button" type="button" (click)="openDetails(item)">Details</button></td>
             </tr>
           }
         </tbody>
@@ -131,6 +133,54 @@
     </nav>
   }
 </section>
+
+<dialog #wallboxDetails class="fota-detail-dialog" aria-labelledby="wallboxDetailHeading">
+  <header class="fota-detail-heading">
+    <h2 id="wallboxDetailHeading">Beta wallbox details</h2>
+    <button class="fota-icon-button" type="button" aria-label="Close wallbox details" (click)="closeDetails()">Close</button>
+  </header>
+  @if (selectedWallbox(); as item) {
+    <dl class="fota-detail-list">
+      <div><dt>Serial number</dt><dd class="fota-mono">{{ item.serialNumber }}</dd></div>
+      <div><dt>Model</dt><dd>{{ item.model || 'Not supplied' }}</dd></div>
+      <div><dt>Firmware version</dt><dd>{{ item.version || 'Not supplied' }}</dd></div>
+      <div><dt>Country</dt><dd>{{ displayCountry(item.countryId) }}</dd></div>
+      <div><dt>Beta pool</dt><dd>{{ item.beta ? 'Member' : 'Not a member' }}</dd></div>
+      <div><dt>Firmware update requested</dt><dd>{{ item.isFirmwareUpdateRequested === null || item.isFirmwareUpdateRequested === undefined ? 'Not supplied' : item.isFirmwareUpdateRequested ? 'Yes' : 'No' }}</dd></div>
+      <div><dt>Firmware update pending</dt><dd>{{ item.pendingFirmwareUpdate === null || item.pendingFirmwareUpdate === undefined ? 'Not supplied' : item.pendingFirmwareUpdate ? 'Yes' : 'No' }}</dd></div>
+    </dl>
+    <h3 class="fota-detail-subheading">Connectors</h3>
+    @if (item.connectors?.length) {
+      <ul class="fota-detail-values">
+        @for (connector of item.connectors; track connector.id ?? $index) {
+          <li>Connector {{ connector.id ?? $index + 1 }}: {{ connector.status || 'Not supplied' }}</li>
+        }
+      </ul>
+    } @else {
+      <p class="fota-state">No connector state is present in this record.</p>
+    }
+    <h3 class="fota-detail-subheading">Pending campaigns</h3>
+    @if (item.pendingCampaignList?.length) {
+      <div class="fota-table-scroll">
+        <table class="fota-table">
+          <thead><tr><th scope="col">Campaign ID</th><th scope="col">Firmware</th><th scope="col">Update status</th><th scope="col">Child installed</th></tr></thead>
+          <tbody>
+            @for (campaign of item.pendingCampaignList; track campaign.campaignId) {
+              <tr>
+                <td class="fota-mono">{{ campaign.campaignId }}</td>
+                <td>{{ campaign.firmwareVersion || 'Not supplied' }}</td>
+                <td>{{ campaign.firmwareUpdateStatus || 'Not supplied' }}</td>
+                <td>{{ campaign.isChildVersionInstalled === null || campaign.isChildVersionInstalled === undefined ? 'Not supplied' : campaign.isChildVersionInstalled ? 'Yes' : 'No' }}</td>
+              </tr>
+            }
+          </tbody>
+        </table>
+      </div>
+    } @else {
+      <p class="fota-state">No pending campaign is listed for this wallbox.</p>
+    }
+  }
+</dialog>
 
 <dialog #betaPoolMutationDialog class="fota-detail-dialog" aria-labelledby="betaPoolMutationHeading" (close)="onPoolMutationDialogClosed()">
   <header class="fota-detail-heading">

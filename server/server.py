@@ -904,6 +904,11 @@ class AppHandler(BaseHTTPRequestHandler):
                     if value not in ("true", "false"):
                         raise FotaReadError(400, "isPushable must be true or false.")
                     filters["isPushable"] = value == "true"
+                if "unassignedCampaign" in params:
+                    value = params["unassignedCampaign"].lower()
+                    if value not in ("true", "false"):
+                        raise FotaReadError(400, "unassignedCampaign must be true or false.")
+                    filters["unassignedCampaign"] = value == "true"
                 payload = list_packages(
                     env, token, page_value("page", 0), page_value("size", 5),
                     params.get("beta", "false").lower() == "true", filters,

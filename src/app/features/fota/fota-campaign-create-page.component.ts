@@ -138,6 +138,18 @@ export class FotaCampaignCreatePageComponent implements OnInit {
     this.clearLaunchedCampaigns();
   }
 
+  campaignLineage(campaign: FotaLaunchedCampaign): string {
+    const relationships = [
+      campaign.parent ? `Parent: ${campaign.parent}` : '',
+      campaign.children?.length ? `Children: ${campaign.children.join(', ')}` : ''
+    ].filter(Boolean);
+    return relationships.join(' / ') || 'Standalone';
+  }
+
+  pushability(campaign: FotaLaunchedCampaign): string {
+    return campaign.isPushable === undefined ? 'Not supplied' : campaign.isPushable ? 'Pushable' : 'Not pushable';
+  }
+
   private clearLaunchedCampaigns(): void {
     this.launchedRequest?.unsubscribe();
     this.launchedRequest = undefined;
