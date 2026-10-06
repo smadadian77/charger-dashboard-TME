@@ -980,7 +980,6 @@ class AppHandler(BaseHTTPRequestHandler):
                     payload.get("findings"),
                     payload.get("question"),
                     self.client_address[0],
-                    history=payload.get("history"),
                 )
             else:
                 response = smart_investigations.generate_findings(context, self.client_address[0])
@@ -994,6 +993,11 @@ class AppHandler(BaseHTTPRequestHandler):
             if exc.retry_after_seconds is not None:
                 error["retryAfterSeconds"] = exc.retry_after_seconds
             self._send_json(error, status=exc.status)
+        except Exception:
+            self._send_json(
+                {"error": "internal_error", "message": "Smart investigation request failed."},
+                status=500,
+            )
 
     def _proxy_support_operation(self):
         try:

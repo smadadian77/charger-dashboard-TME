@@ -426,6 +426,40 @@ class TokenRouteTests(unittest.TestCase):
             {"isPushable": True, "unassignedCampaign": True},
         )
 
+    def test_smart_investigation_chat_route_forwards_supported_arguments(self):
+        with patch(
+            "server.smart_investigations.answer_question",
+            return_value={"answer": "The session timed out."},
+        ) as answer_question:
+            status, payload = self.request_json(
+                "POST",
+                "/api/smart-investigation/chat",
+                body={"context": {"serialNumber": "TACW2244723S0930"}, "findings": [], "question": "Why?"},
+            )
+
+        self.assertEqual(status, 200)
+        self.assertEqual(payload, {"answer": "The session timed out."})
+        answer_question.assert_called_once_with(
+            {"serialNumber": "TACW2244723S0930"}, [], "Why?", "127.0.0.1"
+        )
+
+    def test_smart_investigation_route_returns_json_for_unexpected_errors(self):
+        with patch(
+            "server.smart_investigations.answer_question",
+            side_effect=RuntimeError("internal implementation detail"),
+        ):
+            status, payload = self.request_json(
+                "POST",
+                "/api/smart-investigation/chat",
+                body={"context": {}, "findings": [], "question": "Why?"},
+            )
+
+        self.assertEqual(status, 500)
+        self.assertEqual(payload, {
+            "error": "internal_error",
+            "message": "Smart investigation request failed.",
+        })
+
 
 if __name__ == "__main__":
     unittest.main()

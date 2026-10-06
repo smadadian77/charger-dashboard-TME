@@ -750,49 +750,80 @@
         </dialog>
       </section>
 
-      <section id="smartInvestigationsPanel" class="panel smart-investigations-panel" aria-labelledby="smartInvestigationsHeading">
-        <div class="panel-header smart-investigations-header">
-          <div class="smart-investigations-title-wrap">
-            <span class="ai-sparkle-badge">
+      <section id="smartInvestigationsPanel" class="panel smart-investigations-panel ai-assistant-panel" aria-labelledby="smartInvestigationsHeading" data-state="idle">
+        <header class="ai-assistant-header">
+          <div class="ai-assistant-brand">
+            <span class="ai-sparkle-badge" aria-hidden="true">
               <svg viewBox="0 0 24 24" width="16" height="16" fill="currentColor"><path d="M12 2L14.4 7.6L20 10L14.4 12.4L12 18L9.6 12.4L4 10L9.6 7.6L12 2Z"/></svg>
             </span>
-            <h2 id="smartInvestigationsHeading">Smart AI Investigations</h2>
-            <span class="ai-intel-pill">Live Intelligence</span>
+            <div>
+              <span class="ai-assistant-kicker">CHARGER INTELLIGENCE</span>
+              <h2 id="smartInvestigationsHeading">AI Investigation Assistant</h2>
+            </div>
           </div>
-          <p id="smartInvestigationStatus" role="status" aria-live="polite">Load a charger to begin investigation.</p>
+          <div class="ai-assistant-status">
+            <span class="ai-assistant-state-dot" aria-hidden="true"></span>
+            <p id="smartInvestigationStatus" role="status" aria-live="polite">Waiting for charger context.</p>
+          </div>
+        </header>
+
+        <div class="ai-assistant-context" aria-label="Current investigation context" aria-live="polite">
+          <span id="smartInvestigationContextCharger">Charger not loaded</span>
+          <span id="smartInvestigationContextRange">Waiting for data window</span>
+          <span id="smartInvestigationContextSession">No session in focus</span>
         </div>
-        <p id="smartInvestigationMessage" class="smart-investigation-message" hidden></p>
-        <div id="smartInvestigationFindings" class="smart-investigation-findings" aria-live="polite"></div>
-        <form id="smartInvestigationChatForm" class="smart-investigation-chat" autocomplete="off">
-          <div class="ai-chat-header-row">
-            <label for="smartInvestigationQuestion" class="ai-chat-label">
-              <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>
-              <span>Ask AI Copilot</span>
-            </label>
-            <div class="ai-suggested-prompts" id="aiSuggestedPrompts">
-              <button type="button" class="ai-prompt-chip" data-query="Why did the recent sessions fail?">⚡ Why did sessions fail?</button>
-              <button type="button" class="ai-prompt-chip" data-query="What is the health status of Connector 1?">🔌 Connector 1 health</button>
-              <button type="button" class="ai-prompt-chip" data-query="Summarize all charger anomalies">📊 Summarize anomalies</button>
+
+        <p id="smartInvestigationMessage" class="smart-investigation-message" role="alert" hidden></p>
+        <button id="smartInvestigationRetryBtn" class="ai-retry-button" type="button" hidden>Retry insights</button>
+
+        <div class="ai-assistant-workspace">
+          <section class="ai-assistant-insights" aria-labelledby="aiInsightsHeading">
+            <div class="ai-assistant-section-heading">
+              <span class="ai-section-index">01</span>
+              <div>
+                <h3 id="aiInsightsHeading">Current insight</h3>
+                <p>Findings grounded in the available charger data</p>
+              </div>
             </div>
-          </div>
-          <div class="smart-investigation-input-row">
-            <div class="ai-input-wrapper">
-              <svg class="ai-input-icon" viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><path d="M12 16v-4"/><path d="M12 8h.01"/></svg>
-              <input id="smartInvestigationQuestion" type="text" maxlength="1000" placeholder="Ask AI anything about this charger, sessions, or errors..." disabled />
+            <div id="smartInvestigationFindings" class="smart-investigation-findings" aria-live="polite"></div>
+          </section>
+
+          <section class="ai-assistant-conversation" aria-labelledby="aiConversationHeading">
+            <div class="ai-assistant-section-heading">
+              <span class="ai-section-index">02</span>
+              <div>
+                <h3 id="aiConversationHeading">Ask about this charger</h3>
+                <p>Session context is included automatically</p>
+              </div>
             </div>
-            <button type="submit" class="ai-ask-submit-btn" aria-label="Ask about this investigation" disabled>
-              <span>Ask AI</span>
-              <svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2"><line x1="22" y1="2" x2="11" y2="13"/><polygon points="22 2 15 22 11 13 2 9 22 2"/></svg>
-            </button>
-          </div>
-        </form>
-        <div id="smartInvestigationLatestAnswer" class="smart-investigation-latest-answer" role="status" aria-live="polite" hidden>
-          <div class="ai-answer-header">
-            <span class="ai-avatar"><svg viewBox="0 0 24 24" width="13" height="13" fill="currentColor"><path d="M12 2L14.4 7.6L20 10L14.4 12.4L12 18L9.6 12.4L4 10L9.6 7.6L12 2Z"/></svg></span>
-            <span class="ai-answer-title">AI Synthesis</span>
-          </div>
-          <p id="smartInvestigationLatestQuestion" class="smart-investigation-latest-question"></p>
-          <div id="smartInvestigationAnswer" class="smart-investigation-answer"></div>
+            <div class="ai-suggested-prompts" id="aiSuggestedPrompts" role="group" aria-label="Suggested session questions">
+              <button type="button" class="ai-prompt-chip" data-query="Why did this session fail?">Why did this session fail?</button>
+              <button type="button" class="ai-prompt-chip" data-query="What happened during this session?">What happened in this session?</button>
+              <button type="button" class="ai-prompt-chip" data-query="Compare this session with the previous one.">Compare with previous</button>
+            </div>
+            <form id="smartInvestigationChatForm" class="smart-investigation-chat" autocomplete="off">
+              <label class="ai-chat-label" for="smartInvestigationQuestion">Your question</label>
+              <div class="smart-investigation-input-row">
+                <div class="ai-input-wrapper">
+                  <svg class="ai-input-icon" viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><circle cx="12" cy="12" r="10"/><path d="M12 16v-4"/><path d="M12 8h.01"/></svg>
+                  <input id="smartInvestigationQuestion" type="text" maxlength="1000" placeholder="Ask about this charger or its sessions..." disabled />
+                </div>
+                <button type="submit" class="ai-ask-submit-btn" aria-label="Send question to AI Investigation Assistant" disabled>
+                  <span>Ask</span>
+                  <svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><line x1="22" y1="2" x2="11" y2="13"/><polygon points="22 2 15 22 11 13 2 9 22 2"/></svg>
+                </button>
+              </div>
+            </form>
+            <div id="smartInvestigationLatestAnswer" class="smart-investigation-latest-answer" role="status" aria-live="polite" hidden>
+              <div class="ai-answer-header">
+                <span class="ai-avatar" aria-hidden="true"><svg viewBox="0 0 24 24" width="13" height="13" fill="currentColor"><path d="M12 2L14.4 7.6L20 10L14.4 12.4L12 18L9.6 12.4L4 10L9.6 7.6L12 2Z"/></svg></span>
+                <span class="ai-answer-title">Assistant response</span>
+                <button id="smartInvestigationChatRetryBtn" class="ai-retry-button" type="button" hidden>Retry answer</button>
+              </div>
+              <p id="smartInvestigationLatestQuestion" class="smart-investigation-latest-question"></p>
+              <div id="smartInvestigationAnswer" class="smart-investigation-answer"></div>
+            </div>
+          </section>
         </div>
       </section>
 

@@ -26,9 +26,9 @@ REQUEST_TIMEOUT_SECONDS = 25
 RATE_LIMIT_WINDOW_SECONDS = 60
 RATE_LIMIT_REQUESTS = 12
 
-SYSTEM_INSTRUCTION = """Interpret only this compact, precomputed EV charger investigation packet. The dashboard has already calculated statistics and patterns; do not recalculate them. Distinguish facts from possibilities, never invent causes or details, and cite only supplied evidence IDs. Return at most 3 concise findings, each with a one-sentence summary and a short next step or null."""
+SYSTEM_INSTRUCTION = """Interpret only this compact, precomputed EV charger investigation packet. The dashboard has already calculated statistics and patterns; do not recalculate them. Distinguish facts from possibilities, never invent causes or details, and cite only supplied evidence IDs. Surface a finding only when the packet contains a meaningful abnormal signal; return an empty findings list when the supplied data does not support one. Do not manufacture anomalies to make the response active. Return at most 3 concise findings, each with a one-sentence summary and a short next step or null."""
 
-CHAT_INSTRUCTION = """Answer only from the compact, question-focused charger packet and supplied findings. Do not invent facts or claim unsupported causation. Prefer 1-3 concise sentences and never exceed 5 sentences. Return plain text only; do not reveal chain-of-thought."""
+CHAT_INSTRUCTION = """Answer only from the compact, question-focused charger packet and supplied findings. When sessions.focus.session is present, treat it as the session in focus and state whether it was selected by the user or assumed to be the latest session when that distinction helps answer the question. Compare sessions.focus.previous only when it is present. If the requested session or comparison data is absent, say so instead of guessing. Do not invent facts or claim unsupported causation. Prefer 1-3 concise sentences and never exceed 5 sentences. Return plain text only; do not reveal chain-of-thought."""
 
 FINDINGS_SCHEMA = {
     "type": "object",
@@ -70,6 +70,11 @@ FINDINGS_SCHEMA = {
 
 _SECRET_KEY = re.compile(r"token|api.?key|secret|pin|password|credential|cookie|authorization|auth.?header", re.I)
 _EVIDENCE_TYPES = {"event", "session", "connector", "incident", "diagnostic"}
+_SESSION_SUMMARY_FIELDS = {
+    "id", "status", "connectorId", "start", "end", "energyKwh", "diagnosis", "smartCharging",
+    "stopReason", "authMode", "durationSeconds", "startDiagnosis", "endDiagnosis", "verdict",
+    "eventCount", "importantEventCount",
+}
 _rate_windows = {}
 _rate_lock = threading.Lock()
 
@@ -198,6 +203,35 @@ def _require_fields(value, allowed):
         raise ValueError("Investigation packet contains unsupported fields.")
 
 
+def _validate_session_summary(value):
+    _require_fields(value, _SESSION_SUMMARY_FIELDS)
+    if not isinstance(value.get("id"), str) or not value["id"] or len(value["id"]) > 200:
+        raise ValueError("Investigation session summary is invalid.")
+    for key, maximum in (
+        ("status", 60), ("start", 40), ("end", 40), ("diagnosis", 120),
+        ("stopReason", 100), ("authMode", 80), ("startDiagnosis", 80),
+        ("endDiagnosis", 80), ("verdict", 300),
+    ):
+        item = value.get(key)
+        if item is not None and (not isinstance(item, str) or len(item) > maximum):
+            raise ValueError("Investigation session summary is invalid.")
+    connector_id = value.get("connectorId")
+    if connector_id is not None and (isinstance(connector_id, bool) or not isinstance(connector_id, (str, int))):
+        raise ValueError("Investigation session summary is invalid.")
+    for key in ("energyKwh", "durationSeconds"):
+        item = value.get(key)
+        if item is not None and (
+            isinstance(item, bool) or not isinstance(item, (int, float)) or not math.isfinite(item)
+        ):
+            raise ValueError("Investigation session summary is invalid.")
+    if "smartCharging" in value and not isinstance(value["smartCharging"], bool):
+        raise ValueError("Investigation session summary is invalid.")
+    for key in ("eventCount", "importantEventCount"):
+        item = value.get(key)
+        if item is not None and (isinstance(item, bool) or not isinstance(item, int) or not 0 <= item <= 300):
+            raise ValueError("Investigation session summary is invalid.")
+
+
 def validate_context(context):
     if not isinstance(context, dict):
         raise ValueError("Investigation packet is required.")
@@ -231,7 +265,7 @@ def validate_context(context):
             raise ValueError("Investigation packet structure is invalid.")
     _require_fields(context["status"], {"connectivity", "chargerHealth", "connectivityCheck", "disconnects", "reconnects", "activeErrors", "smartCharging"})
     _require_fields(context["events"], {"count", "source", "topNames"})
-    _require_fields(context["sessions"], {"count", "source", "statusCounts", "selected"})
+    _require_fields(context["sessions"], {"count", "source", "statusCounts", "selected", "focus"})
     _require_fields(context["power"], {"configuredMaximumPower", "activeChargingLimit", "measuredChargingPower", "source"})
     _require_fields(context["quality"], {"diagnosticStatus", "completeness", "eventsInRange", "invalidTimestamps", "missingSources"})
     if set(context["range"]) - {"start", "end"}:
@@ -253,7 +287,20 @@ def validate_context(context):
     for entry in context["events"].get("topNames", []):
         _require_fields(entry, {"name", "count"})
     for entry in context["sessions"].get("selected", []):
-        _require_fields(entry, {"id", "status", "connectorId", "start", "end", "energyKwh", "diagnosis", "smartCharging"})
+        _validate_session_summary(entry)
+    if "focus" in context["sessions"]:
+        focus = context["sessions"]["focus"]
+        _require_fields(focus, {"source", "session", "previous"})
+        if focus.get("source") not in {"selected", "latest", "none"}:
+            raise ValueError("Investigation session focus is invalid.")
+        focused_session = focus.get("session")
+        previous_session = focus.get("previous")
+        if focused_session is not None:
+            _validate_session_summary(focused_session)
+        if previous_session is not None:
+            _validate_session_summary(previous_session)
+        if (focus["source"] == "none") != (focused_session is None):
+            raise ValueError("Investigation session focus is invalid.")
     _reject_secret_fields(context)
     prompt = {"packet": context}
     prompt_bytes = _json_size(prompt) + len(SYSTEM_INSTRUCTION.encode("utf-8"))
@@ -305,6 +352,15 @@ def validate_findings(findings, context):
             "session", item, item.get("end") or item.get("start"),
             f"{item.get('status', 'Unknown')} session; connector {item.get('connectorId', 'unknown')}",
         )
+    focus = context.get("sessions", {}).get("focus", {})
+    for key in ("session", "previous"):
+        item = focus.get(key) if isinstance(focus, dict) else None
+        if item:
+            add_summary_source(
+                "session", item, item.get("end") or item.get("start"),
+                f"{item.get('status', 'Unknown')} session; connector {item.get('connectorId', 'unknown')}"
+                + (f"; stop reason {item['stopReason']}" if item.get("stopReason") else ""),
+            )
     for item in context.get("connectors", []):
         add_summary_source(
             "connector", item, None,
@@ -436,15 +492,17 @@ def generate_findings(context, identity="local"):
             "local_rate_limited", "Dashboard AI request limit reached.", 429, retry_after
         )
     digest = context_hash(context)
-    raw = _generate({"packet": context}, SYSTEM_INSTRUCTION, FINDINGS_SCHEMA)
-    try:
-        decoded = json.loads(raw)
-        if not isinstance(decoded, dict) or not isinstance(decoded.get("findings"), list):
-            raise ValueError("Structured findings response is invalid.")
-        findings = validate_findings(decoded["findings"][:MAX_FINDINGS], context)
-    except (TypeError, json.JSONDecodeError, ValueError) as exc:
-        raise SmartInvestigationError("invalid_response", "Smart investigation unavailable.", 502) from exc
-    return {"findings": findings, "contextHash": digest}
+    for attempt in range(2):
+        raw = _generate({"packet": context}, SYSTEM_INSTRUCTION, FINDINGS_SCHEMA)
+        try:
+            decoded = json.loads(raw)
+            if not isinstance(decoded, dict) or not isinstance(decoded.get("findings"), list):
+                raise ValueError("Structured findings response is invalid.")
+            findings = validate_findings(decoded["findings"][:MAX_FINDINGS], context)
+            return {"findings": findings, "contextHash": digest}
+        except (TypeError, json.JSONDecodeError, ValueError) as exc:
+            if attempt == 1:
+                raise SmartInvestigationError("invalid_response", "Smart investigation unavailable.", 502) from exc
 
 
 def answer_question(context, findings, question, identity="local"):

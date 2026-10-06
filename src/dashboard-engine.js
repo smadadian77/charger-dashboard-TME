@@ -138,15 +138,22 @@ const state = {
     pendingHash: null,
     findings: [],
     loading: false,
+    packetReady: false,
+    quiet: false,
     error: null,
+    retryableError: false,
+    failedSignature: null,
     generatedAt: null,
     requestId: 0,
+    requestController: null,
+    contextCounts: { events: 0, sessions: 0 },
+    contextInfo: null,
     debounceTimer: null,
     retryTimer: null,
     retrySignature: null,
     retryAttempts: 0,
     refreshBatchDepth: 0,
-    chat: { question: '', answer: '', loading: false, error: null, requestId: 0 },
+    chat: { question: '', answer: '', loading: false, error: null, lastQuestion: '', requestId: 0, controller: null },
   },
 };
 
@@ -4776,15 +4783,15 @@ function renderSmartFindings() {
   const root = document.getElementById('smartInvestigationFindings');
   if (!root) return;
   const smart = state.smartInvestigation;
-  if (!smart.loading && !smart.error && smart.contextHash && !smart.findings.length) {
+  if (!smart.loading && !smart.error && smart.packetReady && smart.quiet) {
     root.innerHTML = `
       <div class="smart-investigation-empty">
         <div class="empty-icon-wrap">
           <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><path d="m9 12 2 2 4-4"/></svg>
         </div>
         <div class="empty-content">
-          <strong>No Critical Anomalies Detected</strong>
-          <p>The charger telemetry appears healthy within the selected time window.</p>
+          <strong>No evidence-backed insight to report</strong>
+          <p>The available charger and session data shows no selected investigation signal in this time window.</p>
         </div>
       </div>`;
     return;
@@ -4873,15 +4880,32 @@ function renderSmartChat() {
   const submit = form?.querySelector('button[type="submit"]');
   const latest = document.getElementById('smartInvestigationLatestAnswer');
   if (!form || !input || !submit || !latest) return;
-  const ready = Boolean(smart.contextHash && !smart.loading && !smart.error);
+  const ready = Boolean(smart.packetReady);
+  const context = smart.contextInfo;
+  const focus = context?.focus;
+  const focusedSession = focus?.session;
+  document.getElementById('smartInvestigationContextCharger').textContent = context?.serialNumber
+    ? `Charger ${context.serialNumber}` : 'Charger not loaded';
+  document.getElementById('smartInvestigationContextRange').textContent = context?.range
+    ? `${formatGlanceTimestamp(context.range.start)} – ${formatGlanceTimestamp(context.range.end)}` : 'Waiting for data window';
+  document.getElementById('smartInvestigationContextSession').textContent = focusedSession
+    ? `${focus.source === 'selected' ? 'Selected' : 'Latest'} session ${focusedSession.id}${focusedSession.status ? ` · ${focusedSession.status}` : ''}${focus.previous ? ' · previous available' : ''}`
+    : 'No session in focus';
+  const prompts = document.getElementById('aiSuggestedPrompts');
+  if (prompts) prompts.hidden = !focusedSession;
   input.disabled = !ready || chat.loading;
   submit.disabled = !ready || chat.loading;
-  input.placeholder = ready ? 'Ask a question about the charger...' : 'Waiting for a charger investigation...';
+  input.placeholder = ready ? 'Ask about this charger or its sessions...' : 'Waiting for charger data...';
   latest.hidden = !chat.question && !chat.answer && !chat.loading && !chat.error;
   document.getElementById('smartInvestigationLatestQuestion').textContent = chat.question ? `You: ${chat.question}` : '';
+  const retry = document.getElementById('smartInvestigationChatRetryBtn');
+  if (retry) {
+    retry.hidden = !chat.retryable || chat.loading || !chat.lastQuestion;
+    retry.disabled = !ready || chat.loading;
+  }
   const answer = document.getElementById('smartInvestigationAnswer');
   answer.classList.toggle('is-loading', chat.loading);
-  answer.textContent = chat.loading ? 'Analyzing…' : chat.error || limitSmartAnswer(chat.answer);
+  answer.textContent = chat.loading ? 'Reviewing the charger and session evidence…' : chat.error || limitSmartAnswer(chat.answer);
 }
 
 function limitSmartAnswer(value) {
@@ -4897,54 +4921,172 @@ function renderSmartInvestigations() {
   const smart = state.smartInvestigation;
   const status = document.getElementById('smartInvestigationStatus');
   const message = document.getElementById('smartInvestigationMessage');
+  const panel = document.getElementById('smartInvestigationsPanel');
+  const retry = document.getElementById('smartInvestigationRetryBtn');
   if (!status || !message) return;
-  status.dataset.state = smart.loading ? 'loading' : smart.error ? 'error' : smart.contextHash ? 'ready' : 'idle';
-  status.textContent = smart.loading ? 'Analyzing current charger context...'
-    : smart.error ? smart.error
-      : smart.contextHash ? smart.findings.length ? `${smart.findings.length} finding${smart.findings.length === 1 ? '' : 's'} · ${smart.generatedAt ? formatGlanceTimestamp(smart.generatedAt) : 'updated'}`
-        : 'No important findings in the current context.'
+  const visualState = smart.loading ? 'thinking' : smart.error ? 'error' : !smart.packetReady ? 'idle' : smart.quiet ? 'quiet' : 'ready';
+  status.dataset.state = visualState;
+  if (panel) panel.dataset.state = visualState;
+  status.textContent = smart.loading ? `Checking ${smart.contextCounts.events} events and ${smart.contextCounts.sessions} sessions...`
+    : smart.error ? 'Assistant unavailable'
+      : smart.packetReady ? smart.quiet ? 'No investigation signal found in the available data.'
+        : smart.findings.length ? `${smart.findings.length} evidence-backed insight${smart.findings.length === 1 ? '' : 's'} · ${smart.generatedAt ? formatGlanceTimestamp(smart.generatedAt) : 'updated'}`
+          : 'No findings supported by the current context.'
         : state.searchId ? 'Waiting for current charger data...' : 'Load a charger to begin investigation.';
   message.hidden = !smart.error;
   message.textContent = smart.error || '';
+  if (retry) {
+    retry.hidden = !smart.retryableError || !smart.failedSignature || !smart.packetReady || smart.loading;
+    retry.disabled = smart.loading;
+  }
   renderSmartFindings();
   renderSmartChat();
 }
 
-function scheduleSmartInvestigationRefresh() {
+function summarizeAssistantSession(session) {
+  if (!session) return null;
+  const id = String(session.transactionId ?? '');
+  const analysis = id ? analyzeSession(id) : null;
+  const auth = formatAuthMode(session.authMode || session.mode);
+  const durationSeconds = Number(session.duration);
+  return {
+    id: id.slice(0, 200),
+    status: String(session.status || 'Unknown').slice(0, 60),
+    connectorId: sessionConnectorId(session),
+    start: session.startTime ? String(session.startTime).slice(0, 40) : null,
+    end: session.stopTime ? String(session.stopTime).slice(0, 40) : null,
+    energyKwh: Number.isFinite(Number(session.consumption)) ? Number(session.consumption) : null,
+    diagnosis: analysis ? `${analysis.startDiagnosis.classification}/${analysis.endDiagnosis.classification}` : 'unavailable',
+    smartCharging: Boolean(analysis?.smart),
+    stopReason: session.stopReason ? String(session.stopReason).slice(0, 100) : null,
+    authMode: auth.label === '—' ? null : auth.label,
+    durationSeconds: Number.isFinite(durationSeconds) && durationSeconds >= 0 ? durationSeconds : null,
+    startDiagnosis: analysis?.startDiagnosis.classification || null,
+    endDiagnosis: analysis?.endDiagnosis.classification || null,
+    verdict: analysis?.verdict ? String(analysis.verdict).slice(0, 300) : null,
+    eventCount: analysis?.events.length || 0,
+    importantEventCount: analysis?.importantCount || 0,
+  };
+}
+
+function buildAssistantSessionFocus() {
+  const range = selectedWindow();
+  const start = rangeMilliseconds(range.start, Number.NEGATIVE_INFINITY);
+  const end = rangeMilliseconds(range.end, Date.now());
+  const sessions = (state.chargingSessions || []).filter((session) => {
+    const window = sessionRange(session);
+    return window.start <= end && window.end >= start;
+  });
+  const focus = window.dashboardAssistantUtils.resolveFocusSessions(sessions, state.selectedSessionId);
+  return {
+    source: focus.source,
+    session: summarizeAssistantSession(focus.session),
+    previous: summarizeAssistantSession(focus.previous),
+  };
+}
+
+function cancelSmartInvestigationWork(smart) {
+  window.clearTimeout(smart.debounceTimer);
+  window.clearTimeout(smart.retryTimer);
+  smart.requestId += 1;
+  if (smart.requestController) smart.requestController.abort();
+  smart.requestController = null;
+  smart.debounceTimer = null;
+  smart.retryTimer = null;
+  smart.pendingHash = null;
+  smart.pendingSignature = null;
+}
+
+function cancelSmartChatForContextChange(smart) {
+  const chat = smart.chat;
+  if (!chat.loading) return;
+  chat.requestId += 1;
+  if (chat.controller) chat.controller.abort();
+  chat.controller = null;
+  chat.loading = false;
+  chat.answer = '';
+  chat.error = 'Charger data changed while answering. Retry the question with the current context.';
+  chat.retryable = true;
+}
+
+function scheduleSmartInvestigationRefresh({ force = false } = {}) {
   const smart = state.smartInvestigation;
   if (smart.refreshBatchDepth) return;
   let context;
   try {
     context = buildCompactInvestigationPacket();
   } catch (error) {
-    smart.error = 'Smart investigation unavailable.';
+    cancelSmartChatForContextChange(smart);
+    cancelSmartInvestigationWork(smart);
+    smart.contextHash = null;
+    smart.contextSignature = null;
+    smart.packetReady = false;
+    smart.contextInfo = null;
+    smart.quiet = false;
+    smart.error = 'Unable to prepare charger context.';
+    smart.retryableError = false;
     smart.loading = false;
     smart.findings = [];
     renderSmartInvestigations();
     return;
   }
   if (!context) {
+    cancelSmartChatForContextChange(smart);
+    cancelSmartInvestigationWork(smart);
+    smart.contextHash = null;
+    smart.contextSignature = null;
+    smart.packetReady = false;
+    smart.contextInfo = null;
+    smart.quiet = false;
+    smart.error = null;
+    smart.retryableError = false;
+    smart.loading = false;
+    smart.findings = [];
     renderSmartInvestigations();
     return;
   }
   const serialized = stableSmartSerialization(context);
-  if (serialized === smart.contextSignature || serialized === smart.pendingSignature) return;
+  if (!force && (serialized === smart.contextSignature || serialized === smart.pendingSignature || serialized === smart.failedSignature)) return;
+  const previousSignature = smart.pendingSignature || smart.contextSignature || smart.failedSignature;
+  if (previousSignature && previousSignature !== serialized) cancelSmartChatForContextChange(smart);
   if (smart.retrySignature && smart.retrySignature !== serialized) {
     window.clearTimeout(smart.retryTimer);
     smart.retryTimer = null;
     smart.retrySignature = null;
     smart.retryAttempts = 0;
   }
-  window.clearTimeout(smart.debounceTimer);
-  smart.requestId += 1;
-  smart.chat.requestId += 1;
+  cancelSmartInvestigationWork(smart);
+  if (smart.failedSignature !== serialized) smart.retryAttempts = 0;
+  smart.failedSignature = null;
+  smart.contextCounts = {
+    events: Number(context.events?.count) || 0,
+    sessions: Number(context.sessions?.count) || 0,
+  };
+  smart.serialNumber = context.serialNumber;
+  smart.contextInfo = {
+    serialNumber: context.serialNumber,
+    range: context.range,
+    focus: buildAssistantSessionFocus(),
+  };
+  smart.packetReady = true;
+  smart.quiet = !window.dashboardAssistantUtils.hasInvestigableSignal(context);
+  smart.contextHash = null;
+  smart.contextSignature = null;
+  smart.error = null;
+  smart.retryableError = false;
+  smart.loading = false;
+  smart.findings = [];
+  if (smart.quiet) {
+    smart.contextSignature = serialized;
+    smart.generatedAt = new Date().toISOString();
+    renderSmartInvestigations();
+    return;
+  }
   smart.pendingSignature = serialized;
   smart.pendingHash = null;
-  smart.contextHash = null;
-  smart.findings = [];
-  smart.error = null;
   smart.loading = true;
-  smart.chat = { question: '', answer: '', loading: false, error: null, requestId: smart.chat.requestId };
+  smart.quiet = false;
+  smart.requestId += 1;
   const requestId = smart.requestId;
   const searchId = state.searchId;
   renderSmartInvestigations();
@@ -4955,12 +5097,17 @@ function scheduleSmartInvestigationRefresh() {
 
 async function requestSmartInvestigation(context, serialized, requestId, searchId) {
   const smart = state.smartInvestigation;
+  const controller = new AbortController();
+  let timedOut = false;
+  smart.requestController = controller;
   try {
     const digest = await hashSmartInvestigationContext(serialized);
-    if (requestId !== smart.requestId || searchId !== state.searchId) return;
+    if (requestId !== smart.requestId || searchId !== state.searchId || controller.signal.aborted) return;
     smart.pendingHash = digest;
-    const controller = new AbortController();
-    const timeoutId = window.setTimeout(() => controller.abort(), 30_000);
+    const timeoutId = window.setTimeout(() => {
+      timedOut = true;
+      controller.abort();
+    }, 30_000);
     let response;
     try {
       response = await fetch(dashboardApiUrl('/api/smart-investigation'), {
@@ -4983,11 +5130,14 @@ async function requestSmartInvestigation(context, serialized, requestId, searchI
     smart.findings = result.findings.slice(0, 3);
     smart.contextHash = result.contextHash;
     smart.contextSignature = serialized;
+    smart.failedSignature = null;
     smart.pendingHash = null;
     smart.pendingSignature = null;
     smart.generatedAt = new Date().toISOString();
     smart.loading = false;
     smart.error = null;
+    smart.retryableError = false;
+    smart.quiet = false;
     smart.retrySignature = null;
     smart.retryAttempts = 0;
     window.clearTimeout(smart.retryTimer);
@@ -4996,19 +5146,18 @@ async function requestSmartInvestigation(context, serialized, requestId, searchI
     if (requestId !== smart.requestId || searchId !== state.searchId) return;
     smart.pendingHash = null;
     smart.pendingSignature = null;
-    smart.contextSignature = serialized;
     smart.loading = false;
-    const retryable = ['provider_rate_limited', 'local_rate_limited', 'provider_unavailable'].includes(error.code);
-    const shouldRetry = retryable && smart.retryAttempts < 3;
-    const providerMessage = retryable ? error.message : 'Smart investigation unavailable.';
-    const retryAfterSeconds = Math.max(0, Number(error.retryAfterSeconds) || 0);
-    const backoffSeconds = Math.min(3600, 60 * (2 ** smart.retryAttempts));
-    const delayMs = Math.max(retryAfterSeconds, backoffSeconds) * 1000 + Math.random() * 5000;
-    const retryMinutes = Math.max(1, Math.ceil(delayMs / 60_000));
+    const code = error?.code || (timedOut ? 'provider_timeout' : error?.name === 'AbortError' ? 'aborted' : 'network_error');
+    const failure = window.dashboardAssistantUtils.classifyAssistantFailure(
+      code, smart.retryAttempts, Number(error?.retryAfterSeconds) || 0
+    );
+    const shouldRetry = failure.retryable && smart.retryAttempts < 2;
+    const retrySeconds = Math.ceil(failure.delayMs / 1000);
+    smart.failedSignature = serialized;
     smart.error = shouldRetry
-      ? `${providerMessage} Retrying in about ${retryMinutes} minute${retryMinutes === 1 ? '' : 's'}.`
-      : retryable ? `${providerMessage} Automatic retries exhausted; check the API rate limit and quota.`
-        : providerMessage;
+      ? `${failure.message} Retrying in ${retrySeconds < 60 ? `${retrySeconds} seconds` : `${Math.ceil(retrySeconds / 60)} minutes`}.`
+      : `${failure.message}${failure.retryable ? ' Use Retry to try this context again.' : ''}`;
+    smart.retryableError = failure.retryable;
     smart.findings = [];
     if (shouldRetry) {
       smart.retrySignature = serialized;
@@ -5023,36 +5172,46 @@ async function requestSmartInvestigation(context, serialized, requestId, searchI
           return;
         }
         if (!currentContext || stableSmartSerialization(currentContext) !== serialized) {
+          smart.retryAttempts = 0;
+          smart.retrySignature = null;
           scheduleSmartInvestigationRefresh();
           return;
         }
-        smart.contextSignature = null;
-        scheduleSmartInvestigationRefresh();
-      }, delayMs);
+        smart.failedSignature = null;
+        scheduleSmartInvestigationRefresh({ force: true });
+      }, failure.delayMs);
     }
+  } finally {
+    if (smart.requestController === controller) smart.requestController = null;
   }
   renderSmartInvestigations();
 }
 
 function resetSmartInvestigation() {
   const smart = state.smartInvestigation;
-  window.clearTimeout(smart.debounceTimer);
-  window.clearTimeout(smart.retryTimer);
-  smart.requestId += 1;
+  cancelSmartInvestigationWork(smart);
+  if (smart.chat.controller) smart.chat.controller.abort();
+  smart.chat.controller = null;
   smart.chat.requestId += 1;
   smart.contextHash = null;
   smart.serialNumber = document.getElementById('serialNumber')?.value.trim() || '';
   smart.contextSignature = null;
+  smart.failedSignature = null;
   smart.pendingHash = null;
   smart.pendingSignature = null;
   smart.retryTimer = null;
   smart.retrySignature = null;
   smart.retryAttempts = 0;
+  smart.contextCounts = { events: 0, sessions: 0 };
+  smart.contextInfo = null;
+  smart.packetReady = false;
+  smart.quiet = false;
   smart.findings = [];
   smart.loading = false;
   smart.error = null;
+  smart.retryableError = false;
   smart.generatedAt = null;
-  smart.chat = { question: '', answer: '', loading: false, error: null, requestId: smart.chat.requestId };
+  smart.chat = { question: '', answer: '', loading: false, error: null, lastQuestion: '', requestId: smart.chat.requestId, controller: null };
   renderSmartInvestigations();
 }
 
@@ -5110,6 +5269,7 @@ function buildChatContext(question, investigationPacket) {
       source: investigationPacket.sessions.source,
       statusCounts: wantsSessions ? investigationPacket.sessions.statusCounts : {},
       selected: compactRecords('session', investigationPacket.sessions.selected, wantsSessions),
+      focus: buildAssistantSessionFocus(),
     },
     connectors: compactRecords('connector', investigationPacket.connectors, wantsDiagnostics),
     incidents: compactRecords('incident', investigationPacket.incidents, wantsDiagnostics),
@@ -5136,50 +5296,60 @@ async function askSmartInvestigationQuestion(event) {
   const input = document.getElementById('smartInvestigationQuestion');
   const question = input.value.trim();
   const smart = state.smartInvestigation;
-  if (!question || question.length > 1_000 || !smart.contextHash || smart.loading || smart.chat.loading || smart.error) return;
+  if (!question || question.length > 1_000 || !smart.packetReady || smart.chat.loading) return;
   let context;
   try {
     context = buildCompactInvestigationPacket();
   } catch (error) {
-    smart.chat.error = 'Unable to answer this question.';
+    smart.chat.error = 'Unable to prepare the current charger context.';
+    smart.chat.retryable = false;
+    renderSmartChat();
+    return;
+  }
+  if (!context) {
+    smart.chat.error = 'Charger data is still updating. Try again when the current context is ready.';
+    smart.chat.retryable = true;
     renderSmartChat();
     return;
   }
   const serialized = stableSmartSerialization(context);
-  if (!context || serialized !== smart.contextSignature) {
+  const currentSignature = smart.pendingSignature || smart.contextSignature || smart.failedSignature;
+  if (serialized !== currentSignature) {
     scheduleSmartInvestigationRefresh();
-    return;
   }
   const chatPayload = buildChatContext(question, context);
   if (!chatPayload.context) {
     smart.chat.error = 'This question exceeds the compact context budget. Shorten it and try again.';
+    smart.chat.retryable = false;
     renderSmartChat();
     return;
   }
   const chat = smart.chat;
   const requestId = ++chat.requestId;
   const searchId = state.searchId;
-  const investigationHash = smart.contextHash;
+  const investigationSignature = serialized;
   chat.question = question;
+  chat.lastQuestion = question;
   chat.answer = '';
   chat.error = null;
+  chat.retryable = false;
   chat.loading = true;
   input.value = '';
   renderSmartChat();
+  const controller = new AbortController();
+  chat.controller = controller;
+  let timedOut = false;
+  const timeoutId = window.setTimeout(() => {
+    timedOut = true;
+    controller.abort();
+  }, 30_000);
   try {
-    const controller = new AbortController();
-    const timeoutId = window.setTimeout(() => controller.abort(), 30_000);
-    let response;
-    try {
-      response = await fetch(dashboardApiUrl('/api/smart-investigation/chat'), {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(chatPayload),
-        signal: controller.signal,
-      });
-    } finally {
-      window.clearTimeout(timeoutId);
-    }
+    const response = await fetch(dashboardApiUrl('/api/smart-investigation/chat'), {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(chatPayload),
+      signal: controller.signal,
+    });
     const result = await response.json();
     if (!response.ok || typeof result.answer !== 'string') {
       const requestError = new Error(result.message || 'Unable to answer this question.');
@@ -5187,22 +5357,49 @@ async function askSmartInvestigationQuestion(event) {
       requestError.retryAfterSeconds = Number(result.retryAfterSeconds) || null;
       throw requestError;
     }
-    if (requestId !== chat.requestId || searchId !== state.searchId || investigationHash !== smart.contextHash) return;
+    const activeSignature = smart.pendingSignature || smart.contextSignature || smart.failedSignature;
+    if (requestId !== chat.requestId || searchId !== state.searchId || investigationSignature !== activeSignature) return;
     chat.answer = limitSmartAnswer(result.answer);
     chat.error = null;
+    chat.retryable = false;
     chat.loading = false;
   } catch (error) {
     if (requestId !== chat.requestId || searchId !== state.searchId) return;
     chat.answer = '';
-    const rateLimited = ['provider_rate_limited', 'local_rate_limited'].includes(error.code);
-    const retryAfterSeconds = Math.max(0, Math.min(3_600, Number(error.retryAfterSeconds) || 0));
-    const retryMessage = retryAfterSeconds
-      ? ` Try again in about ${Math.max(1, Math.ceil(retryAfterSeconds / 60))} minute${Math.ceil(retryAfterSeconds / 60) === 1 ? '' : 's'}.`
+    const code = error?.code || (timedOut ? 'provider_timeout' : 'network_error');
+    const failure = window.dashboardAssistantUtils.classifyAssistantFailure(
+      code, 0, Number(error?.retryAfterSeconds) || 0
+    );
+    const retrySeconds = Math.ceil(failure.delayMs / 1000);
+    const retryMessage = failure.retryable && retrySeconds >= 60
+      ? ` Try again in about ${Math.ceil(retrySeconds / 60)} minute${Math.ceil(retrySeconds / 60) === 1 ? '' : 's'}.`
       : '';
-    chat.error = rateLimited ? `${error.message}${retryMessage}` : 'Unable to answer this question.';
+    chat.error = `${failure.message}${retryMessage}`;
+    chat.retryable = failure.retryable;
     chat.loading = false;
+  } finally {
+    window.clearTimeout(timeoutId);
+    if (chat.controller === controller) chat.controller = null;
   }
   renderSmartChat();
+}
+
+function retrySmartInvestigationQuestion() {
+  const chat = state.smartInvestigation.chat;
+  const input = document.getElementById('smartInvestigationQuestion');
+  if (!chat.retryable || !chat.lastQuestion || !input || !state.smartInvestigation.packetReady) return;
+  input.value = chat.lastQuestion;
+  void askSmartInvestigationQuestion({ preventDefault() {} });
+}
+
+function retrySmartInvestigation() {
+  const smart = state.smartInvestigation;
+  if (!smart.packetReady || !smart.failedSignature || smart.loading) return;
+  smart.retryAttempts = 0;
+  smart.retrySignature = null;
+  smart.failedSignature = null;
+  smart.error = null;
+  scheduleSmartInvestigationRefresh({ force: true });
 }
 
 function focusSmartInvestigationEvidence(type, id) {
@@ -12423,6 +12620,8 @@ async function startDashboardApp() {
   renderDiagnosticResults(null);
   renderSmartInvestigations();
   document.getElementById('smartInvestigationChatForm').addEventListener('submit', askSmartInvestigationQuestion);
+  document.getElementById('smartInvestigationRetryBtn')?.addEventListener('click', retrySmartInvestigation);
+  document.getElementById('smartInvestigationChatRetryBtn')?.addEventListener('click', retrySmartInvestigationQuestion);
   document.querySelectorAll('#aiSuggestedPrompts .ai-prompt-chip').forEach((btn) => {
     btn.addEventListener('click', () => {
       const input = document.getElementById('smartInvestigationQuestion');
