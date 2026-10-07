@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { classifyAssistantFailure, hasInvestigableSignal, resolveFocusSessions } from './investigation-assistant-utils';
+import { classifyAssistantFailure, extractRequestedSessionId, hasInvestigableSignal, resolveFocusSessions } from './investigation-assistant-utils';
 
 describe('investigation-assistant-utils', () => {
   it('stays quiet for healthy data and signals concrete abnormalities or incomplete sources', () => {
@@ -40,5 +40,28 @@ describe('investigation-assistant-utils', () => {
       previous: null
     });
     expect(resolveFocusSessions([], null)).toEqual({ source: 'none', session: null, previous: null });
+  });
+
+  it('uses an explicitly requested session without silently substituting latest when it is absent', () => {
+    const sessions = [
+      { transactionId: '69', startTime: '2026-10-05T10:00:00Z' },
+      { transactionId: '76', startTime: '2026-10-06T10:00:00Z' }
+    ];
+    expect(extractRequestedSessionId('What happened in session 69?')).toBe('69');
+    expect(extractRequestedSessionId('Explain session #69')).toBe('69');
+    expect(extractRequestedSessionId('Tell me about session ID 69')).toBe('69');
+    expect(extractRequestedSessionId('Compare this session with the previous one.')).toBeNull();
+    expect(resolveFocusSessions(sessions, '76', '69')).toMatchObject({
+      source: 'requested',
+      session: { transactionId: '69' },
+      previous: null,
+      requestedSessionId: '69'
+    });
+    expect(resolveFocusSessions(sessions, '76', '42')).toEqual({
+      source: 'requested',
+      session: null,
+      previous: null,
+      requestedSessionId: '42'
+    });
   });
 });

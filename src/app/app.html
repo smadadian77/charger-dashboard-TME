@@ -544,6 +544,7 @@
       <section class="panel glance-section" aria-labelledby="glanceHeading">
         <div class="panel-header">
           <h2 id="glanceHeading">At a Glance</h2>
+          <button type="button" class="card-reload-btn" data-card-reload="glance" aria-label="Refresh at a glance data" title="Refresh at a glance data"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M20 7v5h-5M4 17v-5h5"/><path d="M5.6 9a7 7 0 0 1 11.7-2L20 12M4 12l2.7 5a7 7 0 0 0 11.7-2"/></svg></button>
         </div>
         <div id="glanceGrid" class="glance-grid"></div>
       </section>
@@ -630,6 +631,7 @@
           </div>
 
           <div class="toolkit-controls-right">
+            <button type="button" class="card-reload-btn" data-card-reload="operations" aria-label="Refresh operations toolkit" title="Refresh operations toolkit"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M20 7v5h-5M4 17v-5h5"/><path d="M5.6 9a7 7 0 0 1 11.7-2L20 12M4 12l2.7 5a7 7 0 0 0 11.7-2"/></svg></button>
             <details class="support-operation-history-disclosure">
               <summary><svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg> History <span id="supportOperationHistoryCount">0</span></summary>
               <ol id="supportOperationHistory" class="support-operation-history"></ol>
@@ -831,7 +833,10 @@
         <article class="panel info-card">
           <div class="panel-header">
             <h2>Charger info</h2>
-            <span id="chargerSummary" class="charger-lights">Search to load charger details</span>
+            <div class="card-header-actions">
+              <span id="chargerSummary" class="charger-lights">Search to load charger details</span>
+              <button type="button" class="card-reload-btn" data-card-reload="chargerInfo" aria-label="Refresh charger information" title="Refresh charger information"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M20 7v5h-5M4 17v-5h5"/><path d="M5.6 9a7 7 0 0 1 11.7-2L20 12M4 12l2.7 5a7 7 0 0 0 11.7-2"/></svg></button>
+            </div>
           </div>
           <div id="chargerProfile" class="charger-profile">
             <p class="empty-state">No charger record yet.</p>
@@ -840,7 +845,10 @@
         <article class="panel info-card">
           <div class="panel-header">
             <h2>Charger access</h2>
-            <span id="accessSummary" class="charger-lights">Search to load access</span>
+            <div class="card-header-actions">
+              <span id="accessSummary" class="charger-lights">Search to load access</span>
+              <button type="button" class="card-reload-btn" data-card-reload="access" aria-label="Refresh charger access" title="Refresh charger access"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M20 7v5h-5M4 17v-5h5"/><path d="M5.6 9a7 7 0 0 1 11.7-2L20 12M4 12l2.7 5a7 7 0 0 0 11.7-2"/></svg></button>
+            </div>
           </div>
           <div id="accessProfile" class="charger-profile">
             <p class="empty-state">No access record yet.</p>
@@ -849,7 +857,10 @@
         <article class="panel info-card">
           <div class="panel-header">
             <h2>Smart charging info</h2>
-            <span id="smartSummary" class="charger-lights">Search to load smart charging</span>
+            <div class="card-header-actions">
+              <span id="smartSummary" class="charger-lights">Search to load smart charging</span>
+              <button type="button" class="card-reload-btn" data-card-reload="smartCharging" aria-label="Refresh smart charging information" title="Refresh smart charging information"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M20 7v5h-5M4 17v-5h5"/><path d="M5.6 9a7 7 0 0 1 11.7-2L20 12M4 12l2.7 5a7 7 0 0 0 11.7-2"/></svg></button>
+            </div>
           </div>
           <div id="smartChargingProfile" class="charger-profile">
             <p class="empty-state">No smart charging record yet.</p>
@@ -858,6 +869,7 @@
         <article class="panel info-card">
           <div class="panel-header">
             <h2>Notable events</h2>
+            <button type="button" class="card-reload-btn" data-card-reload="notableEvents" aria-label="Refresh notable events" title="Refresh notable events"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M20 7v5h-5M4 17v-5h5"/><path d="M5.6 9a7 7 0 0 1 11.7-2L20 12M4 12l2.7 5a7 7 0 0 0 11.7-2"/></svg></button>
           </div>
           <div id="notableEvents" class="charger-profile">
             <p class="empty-state">Search to load notable events.</p>
@@ -873,7 +885,10 @@
               <span class="manufacturer-data-brand">ChargeDot</span>
             </span>
             <span id="manufacturerDataSummary" class="manufacturer-data-primary">Load a charger to view key details.</span>
-            <span id="manufacturerDataStatus" class="manufacturer-data-status" role="status" aria-live="polite">Waiting for charger.</span>
+            <span class="manufacturer-data-summary-actions">
+              <span id="manufacturerDataStatus" class="manufacturer-data-status" role="status" aria-live="polite">Waiting for charger.</span>
+              <button type="button" class="card-reload-btn" data-card-reload="manufacturer" aria-label="Refresh manufacturer data" title="Refresh manufacturer data"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M20 7v5h-5M4 17v-5h5"/><path d="M5.6 9a7 7 0 0 1 11.7-2L20 12M4 12l2.7 5a7 7 0 0 0 11.7-2"/></svg></button>
+            </span>
           </summary>
           <div id="manufacturerDataContent" class="manufacturer-data-content"></div>
         </details>
@@ -942,6 +957,7 @@
       <section class="panel timeline-panel" id="connectorPanel">
         <div class="panel-header">
           <h2>Connector status</h2>
+          <button type="button" class="card-reload-btn" data-card-reload="connector" aria-label="Refresh connector status and history" title="Refresh connector status and history"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M20 7v5h-5M4 17v-5h5"/><path d="M5.6 9a7 7 0 0 1 11.7-2L20 12M4 12l2.7 5a7 7 0 0 0 11.7-2"/></svg></button>
           <div id="connectorTabs" class="connector-tabs" role="tablist" aria-label="Connector timelines"></div>
         </div>
         <div id="connectorPanes" class="connector-panes"></div>
@@ -950,6 +966,7 @@
       <section id="eventsPanel" class="panel events-section">
         <div class="panel-header">
           <h2>Events</h2>
+          <button type="button" class="card-reload-btn" data-card-reload="events" aria-label="Refresh events" title="Refresh events"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M20 7v5h-5M4 17v-5h5"/><path d="M5.6 9a7 7 0 0 1 11.7-2L20 12M4 12l2.7 5a7 7 0 0 0 11.7-2"/></svg></button>
         </div>
         <div id="eventLegend" class="event-legend" aria-label="Event type legend"></div>
         <section class="filter-row">

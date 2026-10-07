@@ -2,7 +2,7 @@ import { Component, AfterViewInit } from '@angular/core';
 import { RouterOutlet } from '@angular/router';
 import { initializeDashboardWhenReady } from './dashboard-bootstrap';
 import { findSerialSuggestions, isValidChargerSerial, normalizeSerialNumber } from './serial-number-utils';
-import { classifyAssistantFailure, hasInvestigableSignal, resolveFocusSessions } from './investigation-assistant-utils';
+import { classifyAssistantFailure, extractRequestedSessionId, hasInvestigableSignal, resolveFocusSessions } from './investigation-assistant-utils';
 
 declare global {
   interface Window {
@@ -15,6 +15,7 @@ declare global {
     };
     dashboardAssistantUtils?: {
       classifyAssistantFailure: typeof classifyAssistantFailure;
+      extractRequestedSessionId: typeof extractRequestedSessionId;
       hasInvestigableSignal: typeof hasInvestigableSignal;
       resolveFocusSessions: typeof resolveFocusSessions;
     };
@@ -34,7 +35,7 @@ export class App implements AfterViewInit {
 
   ngAfterViewInit(): void {
     window.dashboardSerialUtils = { findSerialSuggestions, isValidChargerSerial, normalizeSerialNumber };
-    window.dashboardAssistantUtils = { classifyAssistantFailure, hasInvestigableSignal, resolveFocusSessions };
+    window.dashboardAssistantUtils = { classifyAssistantFailure, extractRequestedSessionId, hasInvestigableSignal, resolveFocusSessions };
     const script = document.createElement('script');
     script.src = `/dashboard-engine.js?v=${Date.now()}`;
     script.async = true;

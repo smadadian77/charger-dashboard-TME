@@ -26,9 +26,9 @@ REQUEST_TIMEOUT_SECONDS = 25
 RATE_LIMIT_WINDOW_SECONDS = 60
 RATE_LIMIT_REQUESTS = 12
 
-SYSTEM_INSTRUCTION = """Interpret only this compact, precomputed EV charger investigation packet. The dashboard has already calculated statistics and patterns; do not recalculate them. Distinguish facts from possibilities, never invent causes or details, and cite only supplied evidence IDs. Surface a finding only when the packet contains a meaningful abnormal signal; return an empty findings list when the supplied data does not support one. Do not manufacture anomalies to make the response active. Return at most 3 concise findings, each with a one-sentence summary and a short next step or null."""
+SYSTEM_INSTRUCTION = """Interpret only this compact, precomputed EV charger investigation packet. The dashboard has already calculated statistics and patterns; do not recalculate them. Distinguish facts from possibilities, never invent causes or details, and cite only supplied evidence IDs. Surface a finding only when the packet contains a meaningful abnormal signal; return an empty findings list when the supplied data does not support one. Do not manufacture anomalies to make the response active. Do not create a finding that merely restates an aggregate diagnostic status or lists diagnostic categories; name a specific observed condition and its concrete evidence, or omit it. Return at most 3 concise findings, each with a one-sentence summary and a short next step or null."""
 
-CHAT_INSTRUCTION = """Answer only from the compact, question-focused charger packet and supplied findings. When sessions.focus.session is present, treat it as the session in focus and state whether it was selected by the user or assumed to be the latest session when that distinction helps answer the question. Compare sessions.focus.previous only when it is present. If the requested session or comparison data is absent, say so instead of guessing. Do not invent facts or claim unsupported causation. Prefer 1-3 concise sentences and never exceed 5 sentences. Return plain text only; do not reveal chain-of-thought."""
+CHAT_INSTRUCTION = """Answer only from the compact, question-focused charger packet and supplied findings. When sessions.focus.source is requested, the user named sessions.focus.requestedSessionId; use only sessions.focus.session if it is present, and if it is absent say that exact session ID is not in the loaded data. Never substitute the latest session for a specifically requested ID. For other focus sources, state whether the session was selected by the user or assumed to be the latest when that distinction helps answer the question. Compare sessions.focus.previous only when it is present. If the requested session or comparison data is absent, say so instead of guessing. Do not invent facts or claim unsupported causation. Prefer 1-3 concise sentences and never exceed 5 sentences. Return plain text only; do not reveal chain-of-thought."""
 
 FINDINGS_SCHEMA = {
     "type": "object",
@@ -75,6 +75,10 @@ _SESSION_SUMMARY_FIELDS = {
     "stopReason", "authMode", "durationSeconds", "startDiagnosis", "endDiagnosis", "verdict",
     "eventCount", "importantEventCount",
 }
+_AGGREGATE_DIAGNOSTIC_SUMMARY = re.compile(
+    r"^\s*diagnostics?\s+report(?:s)?\s+an?\s+(?:attention|pass|fail)\s+status\s+for\b",
+    re.I,
+)
 _rate_windows = {}
 _rate_lock = threading.Lock()
 
@@ -290,16 +294,24 @@ def validate_context(context):
         _validate_session_summary(entry)
     if "focus" in context["sessions"]:
         focus = context["sessions"]["focus"]
-        _require_fields(focus, {"source", "session", "previous"})
-        if focus.get("source") not in {"selected", "latest", "none"}:
+        _require_fields(focus, {"source", "session", "previous", "requestedSessionId"})
+        if focus.get("source") not in {"requested", "selected", "latest", "none"}:
             raise ValueError("Investigation session focus is invalid.")
         focused_session = focus.get("session")
         previous_session = focus.get("previous")
+        requested_id = focus.get("requestedSessionId")
+        if focus["source"] == "requested":
+            if not isinstance(requested_id, str) or not requested_id or len(requested_id) > 200:
+                raise ValueError("Investigation session focus is invalid.")
+            if focused_session is not None and focused_session.get("id") != requested_id:
+                raise ValueError("Investigation session focus is invalid.")
+        elif requested_id is not None:
+            raise ValueError("Investigation session focus is invalid.")
         if focused_session is not None:
             _validate_session_summary(focused_session)
         if previous_session is not None:
             _validate_session_summary(previous_session)
-        if (focus["source"] == "none") != (focused_session is None):
+        if focus["source"] != "requested" and (focus["source"] == "none") != (focused_session is None):
             raise ValueError("Investigation session focus is invalid.")
     _reject_secret_fields(context)
     prompt = {"packet": context}
@@ -402,6 +414,11 @@ def validate_findings(findings, context):
                 break
         if not verified:
             continue
+        if (
+            all(item["type"] == "diagnostic" for item in verified)
+            and _AGGREGATE_DIAGNOSTIC_SUMMARY.search(summary)
+        ):
+            continue
         next_step = finding.get("nextStep")
         normalized.append({
             "id": str(finding.get("id") or f"finding-{len(normalized) + 1}")[:100],
@@ -466,7 +483,11 @@ def _generate(contents, system_instruction, response_schema=None):
     request = Request(
         GROQ_ENDPOINT,
         data=json.dumps(request_body, ensure_ascii=False, separators=(",", ":")).encode("utf-8"),
-        headers={"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"},
+        headers={
+            "Authorization": f"Bearer {api_key}",
+            "Content-Type": "application/json",
+            "User-Agent": "ChargerDashboard/1.0",
+        },
         method="POST",
     )
     try:

@@ -5,9 +5,10 @@ export interface AssistantSessionReference {
 }
 
 export interface AssistantFocus<TSession> {
-  source: 'selected' | 'latest' | 'none';
+  source: 'requested' | 'selected' | 'latest' | 'none';
   session: TSession | null;
   previous: TSession | null;
+  requestedSessionId?: string;
 }
 
 interface AssistantSignalPacket {
@@ -85,7 +86,8 @@ export function classifyAssistantFailure(
 
 export function resolveFocusSessions<TSession extends AssistantSessionReference>(
   sessions: readonly TSession[],
-  selectedSessionId?: string | null
+  selectedSessionId?: string | null,
+  requestedSessionId?: string | null
 ): AssistantFocus<TSession> {
   const ordered = sessions.map((session, index) => ({
     session,
@@ -96,6 +98,17 @@ export function resolveFocusSessions<TSession extends AssistantSessionReference>
     const rightStart = Number.isFinite(right.start) ? right.start : Number.NEGATIVE_INFINITY;
     return rightStart - leftStart || left.index - right.index;
   });
+  if (requestedSessionId) {
+    const requestedIndex = ordered.findIndex(({ session }) =>
+      String(session.transactionId ?? session.id ?? '') === requestedSessionId
+    );
+    return {
+      source: 'requested',
+      session: requestedIndex >= 0 ? ordered[requestedIndex].session : null,
+      previous: requestedIndex >= 0 ? ordered[requestedIndex + 1]?.session ?? null : null,
+      requestedSessionId
+    };
+  }
   const selectedIndex = selectedSessionId
     ? ordered.findIndex(({ session }) => String(session.transactionId ?? session.id ?? '') === selectedSessionId)
     : -1;
@@ -107,4 +120,11 @@ export function resolveFocusSessions<TSession extends AssistantSessionReference>
     session: ordered[focusIndex].session,
     previous: ordered[focusIndex + 1]?.session ?? null
   };
+}
+
+export function extractRequestedSessionId(question: string): string | null {
+  const explicitReference = question.match(/\b(?:session|transaction)\s+(?:id\s*|#\s*)([A-Za-z0-9_-]{1,200})\b/i);
+  if (explicitReference) return explicitReference[1];
+  const numericReference = question.match(/\b(?:session|transaction)\s+(\d{1,20})\b/i);
+  return numericReference?.[1] ?? null;
 }

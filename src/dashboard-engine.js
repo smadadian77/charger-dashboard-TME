@@ -123,6 +123,7 @@ const state = {
   incidents: [],
   toolRuns: {},
   domainRefreshIds: { charger: 0, events: 0, sessions: 0 },
+  cardRefreshIds: { chargerInfo: 0, access: 0, smartCharging: 0 },
   timelineHistory: [],
   timelineRestoring: false,
   supportOperationInFlight: false,
@@ -3737,7 +3738,7 @@ function notableEventRows() {
   const windowEvents = state.allEvents.filter((event) => inWindow(event.timestamp));
   const blob = (event) => JSON.stringify(event.raw || event.additionalData || {});
   const powerLoss = windowEvents.filter((event) => /power[\s_-]*loss/i.test(event.eventName) || /power[\s_-]*loss/i.test(blob(event)));
-  const boots = windowEvents.filter((event) => /bootnotification/i.test(event.eventName));
+  const boots = windowEvents.filter((event) => /boot[_\s-]*notification/i.test(event.eventName));
   const disconnects = windowEvents.filter((event) => /disconnect/i.test(event.eventName) || /offline/i.test(blob(event)));
   const reconnects = windowEvents.filter((event) => /reconnect/i.test(event.eventName));
   if (state.wallbox && inWindow(state.wallbox.disconnectedOn)) {
@@ -3769,9 +3770,9 @@ function renderNotableEvents() {
     'Factory reset': /factory.?reset/i,
     'Connector 1 faulted': /STATUS_NOTIFICATION/i,
     'Power loss': /power[\s_-]*loss/i,
-    Connection: /disconnect|reconnect|offline|online|bootnotification/i,
+    Connection: /disconnect|reconnect|offline|online|boot[_\s-]*notification/i,
     Disconnections: /disconnect|offline/i,
-    Reconnections: /reconnect|bootnotification/i,
+    Reconnections: /reconnect|boot[_\s-]*notification/i,
   };
   const visibleWindow = selectedWindow();
   const evidenceFor = (label) => state.allEvents.filter((event) => {
@@ -4185,7 +4186,7 @@ function incidentCandidate(event) {
   const groups = [];
   if (/disconnect|reconnect|offline|online/.test(name)) groups.push('connectivity');
   if (/power[\s_-]*loss/.test(name)) groups.push('power');
-  if (/bootnotification|reboot|restart/.test(name)) groups.push('boot');
+  if (/boot[_\s-]*notification|reboot|restart/.test(name)) groups.push('boot');
   if (/fault|status_notification/.test(name) && connectorStatus(event, eventConnectorIds(event)[0] || 1) === 'Faulted') groups.push('connector-fault');
   if (/authoriz|reject|timeout|timed.?out|cancel/.test(name)) groups.push('session-or-authorization');
   return groups.length ? { event, time: new Date(event.timestamp).getTime(), groups, connectorIds: eventConnectorIds(event), session: relatedSessionForEvent(event) } : null;
@@ -4353,7 +4354,7 @@ function detectRecurringProblems(start = selectedWindow().start, end = selectedW
   const categories = [
     ['disconnect', /disconnect|offline/i], ['connector_fault', /fault/i],
     ['failed_start', /authorization.*(fail|reject)|start.*(fail|reject)/i],
-    ['power_loss', /power[\s_-]*loss/i], ['boot', /bootnotification|reboot|restart/i],
+    ['power_loss', /power[\s_-]*loss/i], ['boot', /boot[_\s-]*notification|reboot|restart/i],
     ['timeout', /timeout|timed.?out/i],
   ];
   return categories.map(([category, pattern]) => {
@@ -4515,10 +4516,10 @@ function createDiagnosticTools() {
       available: () => true,
       run: (context) => {
         const events = eventsInRange(context.start, context.end);
-        const selected = events.filter((event) => /disconnect|reconnect|offline|online|power[\s_-]*loss|bootnotification|reboot|restart/i.test(String(event.eventName || '')));
+        const selected = events.filter((event) => /disconnect|reconnect|offline|online|power[\s_-]*loss|boot[_\s-]*notification|reboot|restart/i.test(String(event.eventName || '')));
         const completeness = state.sourceStatus.events === 'partial' ? 'ATTENTION' : ['loaded', 'empty'].includes(state.sourceStatus.events) ? 'PASS' : 'UNKNOWN';
         return makeDiagnosticResult('event-sequences', 'Connectivity and power events', selected.length ? 'ATTENTION' : completeness,
-          `${selected.filter((event) => /disconnect|reconnect|offline|online/i.test(event.eventName)).length} connectivity, ${selected.filter((event) => /power[\s_-]*loss/i.test(event.eventName)).length} power-loss, and ${selected.filter((event) => /bootnotification|reboot|restart/i.test(event.eventName)).length} boot/restart event(s).`, selected.map(diagnosticEvidence));
+          `${selected.filter((event) => /disconnect|reconnect|offline|online/i.test(event.eventName)).length} connectivity, ${selected.filter((event) => /power[\s_-]*loss/i.test(event.eventName)).length} power-loss, and ${selected.filter((event) => /boot[_\s-]*notification|reboot|restart/i.test(event.eventName)).length} boot/restart event(s).`, selected.map(diagnosticEvidence));
       },
     },
     {
@@ -4783,15 +4784,19 @@ function renderSmartFindings() {
   const root = document.getElementById('smartInvestigationFindings');
   if (!root) return;
   const smart = state.smartInvestigation;
-  if (!smart.loading && !smart.error && smart.packetReady && smart.quiet) {
+  if (!smart.loading && !smart.error && smart.packetReady && (smart.quiet || !smart.findings.length)) {
+    const title = smart.quiet ? 'No noteworthy signal in this data' : 'No specific insight is supported';
+    const detail = smart.quiet
+      ? 'The available charger data is within the checks currently monitored.'
+      : 'The assistant found no concrete issue to call out in the current charger and session data.';
     root.innerHTML = `
       <div class="smart-investigation-empty">
         <div class="empty-icon-wrap">
           <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><path d="m9 12 2 2 4-4"/></svg>
         </div>
         <div class="empty-content">
-          <strong>No evidence-backed insight to report</strong>
-          <p>The available charger and session data shows no selected investigation signal in this time window.</p>
+          <strong>${title}</strong>
+          <p>${detail}</p>
         </div>
       </div>`;
     return;
@@ -4882,15 +4887,19 @@ function renderSmartChat() {
   if (!form || !input || !submit || !latest) return;
   const ready = Boolean(smart.packetReady);
   const context = smart.contextInfo;
-  const focus = context?.focus;
+  const focus = chat.contextFocus || context?.focus;
   const focusedSession = focus?.session;
   document.getElementById('smartInvestigationContextCharger').textContent = context?.serialNumber
     ? `Charger ${context.serialNumber}` : 'Charger not loaded';
   document.getElementById('smartInvestigationContextRange').textContent = context?.range
     ? `${formatGlanceTimestamp(context.range.start)} – ${formatGlanceTimestamp(context.range.end)}` : 'Waiting for data window';
-  document.getElementById('smartInvestigationContextSession').textContent = focusedSession
-    ? `${focus.source === 'selected' ? 'Selected' : 'Latest'} session ${focusedSession.id}${focusedSession.status ? ` · ${focusedSession.status}` : ''}${focus.previous ? ' · previous available' : ''}`
-    : 'No session in focus';
+  document.getElementById('smartInvestigationContextSession').textContent = focus?.source === 'requested'
+    ? focusedSession
+      ? `Requested session ${focusedSession.id}${focusedSession.status ? ` · ${focusedSession.status}` : ''}${focus.previous ? ' · previous available' : ''}`
+      : `Session ${focus.requestedSessionId} is not loaded`
+    : focusedSession
+      ? `${focus.source === 'selected' ? 'Selected' : 'Latest'} session ${focusedSession.id}${focusedSession.status ? ` · ${focusedSession.status}` : ''}${focus.previous ? ' · previous available' : ''}`
+      : 'No session in focus';
   const prompts = document.getElementById('aiSuggestedPrompts');
   if (prompts) prompts.hidden = !focusedSession;
   input.disabled = !ready || chat.loading;
@@ -4969,17 +4978,27 @@ function summarizeAssistantSession(session) {
   };
 }
 
-function buildAssistantSessionFocus() {
+function buildAssistantSessionFocus(requestedSessionId = null) {
   const range = selectedWindow();
   const start = rangeMilliseconds(range.start, Number.NEGATIVE_INFINITY);
   const end = rangeMilliseconds(range.end, Date.now());
-  const sessions = (state.chargingSessions || []).filter((session) => {
+  const allSessions = state.chargingSessions || [];
+  const sessions = allSessions.filter((session) => {
+    const id = String(session.transactionId ?? '');
+    if (requestedSessionId && id === requestedSessionId) return true;
+    if (!requestedSessionId && state.selectedSessionId && id === String(state.selectedSessionId)) return true;
+    if (requestedSessionId) return false;
     const window = sessionRange(session);
     return window.start <= end && window.end >= start;
   });
-  const focus = window.dashboardAssistantUtils.resolveFocusSessions(sessions, state.selectedSessionId);
+  const focus = window.dashboardAssistantUtils.resolveFocusSessions(
+    sessions,
+    state.selectedSessionId,
+    requestedSessionId
+  );
   return {
     source: focus.source,
+    ...(focus.requestedSessionId ? { requestedSessionId: focus.requestedSessionId } : {}),
     session: summarizeAssistantSession(focus.session),
     previous: summarizeAssistantSession(focus.previous),
   };
@@ -5217,6 +5236,8 @@ function resetSmartInvestigation() {
 
 function buildChatContext(question, investigationPacket) {
   const normalized = question.toLowerCase();
+  const requestedSessionId = window.dashboardAssistantUtils.extractRequestedSessionId(question);
+  const sessionFocus = buildAssistantSessionFocus(requestedSessionId);
   const words = normalized.match(/[a-z0-9]{3,}/g) || [];
   const findings = state.smartInvestigation.findings.slice(0, 3).map((finding) => ({
     id: finding.id,
@@ -5268,8 +5289,9 @@ function buildChatContext(question, investigationPacket) {
       count: investigationPacket.sessions.count,
       source: investigationPacket.sessions.source,
       statusCounts: wantsSessions ? investigationPacket.sessions.statusCounts : {},
-      selected: compactRecords('session', investigationPacket.sessions.selected, wantsSessions),
-      focus: buildAssistantSessionFocus(),
+      selected: sessionFocus.source === 'requested'
+        ? [] : compactRecords('session', investigationPacket.sessions.selected, wantsSessions),
+      focus: sessionFocus,
     },
     connectors: compactRecords('connector', investigationPacket.connectors, wantsDiagnostics),
     incidents: compactRecords('incident', investigationPacket.incidents, wantsDiagnostics),
@@ -5335,6 +5357,7 @@ async function askSmartInvestigationQuestion(event) {
   chat.retryable = false;
   chat.loading = true;
   input.value = '';
+  chat.contextFocus = chatPayload.context.sessions.focus;
   renderSmartChat();
   const controller = new AbortController();
   chat.controller = controller;
@@ -7118,6 +7141,105 @@ async function refreshAllRelevant() {
     button.textContent = 'Refresh all current data';
     state.smartInvestigation.refreshBatchDepth = Math.max(0, state.smartInvestigation.refreshBatchDepth - 1);
     if (!state.smartInvestigation.refreshBatchDepth) scheduleSmartInvestigationRefresh();
+  }
+}
+
+async function refreshSingleCardSource(source) {
+  const context = currentRefreshContext();
+  if (!context.serialNumber || !context.token) {
+    setStatus('A charger and valid session are required to refresh this card.', 'warning');
+    return { ok: false };
+  }
+  const requestId = ++state.cardRefreshIds[source];
+  const searchId = state.searchId;
+  const isCurrent = () => state.cardRefreshIds[source] === requestId
+    && state.searchId === searchId
+    && document.getElementById('serialNumber')?.value.trim().toUpperCase() === context.serialNumber;
+
+  if (source === 'chargerInfo') {
+    const [lookup, channel] = await Promise.all([
+      fetchWallbox(context.serialNumber, context.token),
+      fetchChannelInfo(context.serialNumber, context.token),
+    ]);
+    if (!isCurrent()) return { ok: false, stale: true };
+    state.channelData = channel.channelData;
+    state.wallbox = lookup.wallbox ? { ...lookup.wallbox, currentActiveLimit: channel.channelData, channelData: channel.channelData } : null;
+    state.sourceStatus.wallbox = lookup.error ? 'error' : lookup.wallbox ? 'loaded' : 'empty';
+    state.sourceStatus.channelInfo = channel.error ? 'error' : channel.channelData == null ? 'empty' : 'loaded';
+    renderChargerProfile();
+    renderConnectorTimeline();
+    renderAtAGlance();
+    const errors = [lookup.error, channel.error].filter(Boolean);
+    if (errors.some((error) => isAuthTokenError(error, null))) await handleInvalidTokenAndRetry();
+    else setStatus(errors.length ? 'Charger information refreshed with an issue.' : 'Charger information refreshed.', errors.length ? 'warning' : 'success');
+    scheduleSmartInvestigationRefresh();
+    return { ok: errors.length === 0, errors };
+  }
+
+  if (source === 'access') {
+    const result = await fetchAccess(context.serialNumber, context.token);
+    if (!isCurrent()) return { ok: false, stale: true };
+    state.access = result.access;
+    state.sourceStatus.access = result.error ? 'error' : result.access ? 'loaded' : 'empty';
+    renderAccessProfile();
+    renderAtAGlance();
+    if (result.error && isAuthTokenError(result.error, null)) await handleInvalidTokenAndRetry();
+    else setStatus(result.error ? 'Charger access could not be refreshed.' : 'Charger access refreshed.', result.error ? 'warning' : 'success');
+    scheduleSmartInvestigationRefresh();
+    return { ok: !result.error, error: result.error };
+  }
+
+  const result = await fetchSmartCharging(context.serialNumber, context.token);
+  if (!isCurrent()) return { ok: false, stale: true };
+  state.smartCharging = result.smartCharging;
+  state.tariff = result.tariff;
+  state.sourceStatus.smartCharging = result.error ? 'error' : result.smartCharging || result.tariff ? 'loaded' : 'empty';
+  renderSmartChargingInfo();
+  renderAtAGlance();
+  if (result.error && isAuthTokenError(result.error, null)) await handleInvalidTokenAndRetry();
+  else setStatus(result.error ? 'Smart charging information could not be refreshed.' : 'Smart charging information refreshed.', result.error ? 'warning' : 'success');
+  scheduleSmartInvestigationRefresh();
+  return { ok: !result.error, error: result.error };
+}
+
+async function refreshCardData(button) {
+  const target = button.dataset.cardReload;
+  const serial = window.dashboardSerialUtils.normalizeSerialNumber(document.getElementById('serialNumber')?.value || '');
+  button.disabled = true;
+  button.classList.add('is-loading');
+  try {
+    switch (target) {
+      case 'glance':
+        await refreshAllRelevant();
+        break;
+      case 'operations':
+        if (!serial) return;
+        await Promise.all([recheckCharger(), checkSseInteractions(serial)]);
+        loadSupportOperationHistory();
+        renderSupportOperationHistory();
+        break;
+      case 'chargerInfo':
+      case 'access':
+      case 'smartCharging':
+        await refreshSingleCardSource(target);
+        break;
+      case 'notableEvents':
+      case 'events':
+        await refreshEventsOnly();
+        break;
+      case 'connector':
+        await refreshConnectorState();
+        break;
+      case 'manufacturer':
+        if (serial) await loadManufacturerData(serial);
+        else setStatus('A valid charger serial is required to refresh manufacturer data.', 'warning');
+        break;
+    }
+  } catch (error) {
+    setStatus('This card could not be refreshed. Try again.', 'error');
+  } finally {
+    button.disabled = false;
+    button.classList.remove('is-loading');
   }
 }
 
@@ -12584,6 +12706,11 @@ async function startDashboardApp() {
   document.getElementById('refreshEventsOnly').addEventListener('click', refreshEventsOnly);
   document.getElementById('refreshSessionsOnly').addEventListener('click', refreshSessionsOnly);
   document.getElementById('refreshConnectorState').addEventListener('click', refreshConnectorState);
+  document.getElementById('chargerView')?.addEventListener('click', (event) => {
+    const button = event.target.closest('[data-card-reload]');
+    if (!button || button.disabled) return;
+    void refreshCardData(button);
+  });
   document.getElementById('copyInvestigationSummary').addEventListener('click', copyInvestigationSummary);
   document.getElementById('exportInvestigation').addEventListener('click', exportInvestigation);
   document.getElementById('copySelectedEvent').addEventListener('click', copySelectedEvent);
