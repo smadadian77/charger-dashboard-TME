@@ -771,7 +771,7 @@ function detailsFromValue(value) {
   }
   if (typeof value === 'string') {
     const found = [];
-    const pattern = /Connector\(id=(\d+),\s*status=([A-Za-z]+)/g;
+    const pattern = /Connector\(id=(\d+),\s*status=([A-Za-z][A-Za-z0-9_-]*)/g;
     let match = pattern.exec(value);
     while (match) {
       found.push({ id: Number(match[1]), status: match[2] });
@@ -810,15 +810,33 @@ function connectorStatus(event, connectorId) {
   return '';
 }
 
+function sessionConnectorState(event, connectorId) {
+  const known = connectorStatus(event, connectorId);
+  if (known) return known;
+  const blobs = [event.additionalData, event.raw && event.raw.additionalData, event.raw]
+    .map(parseMaybeJson);
+  for (const blob of blobs) {
+    const detail = detailsFromValue(blob).find((item) =>
+      matchesConnector(item, connectorId) && (item.status || item.connectorStatus)
+    );
+    if (detail) return String(detail.status || detail.connectorStatus).trim().replace(/[\s_-]+/g, ' ');
+    if (blob && typeof blob === 'object' && matchesConnector(blob, connectorId)) {
+      const status = blob.status || blob.connectorStatus;
+      if (status) return String(status).trim().replace(/[\s_-]+/g, ' ');
+    }
+  }
+  return '';
+}
+
 function connectorOneStatus(event) {
   return connectorStatus(event, 1);
 }
 
-function connectorIntervals(events, connectorId = 1, rangeEnd = null) {
+function connectorIntervals(events, connectorId = 1, rangeEnd = null, readStatus = connectorStatus) {
   const changes = events
     .map((event) => ({
       time: new Date(event.timestamp).getTime(),
-      status: connectorStatus(event, connectorId),
+      status: readStatus(event, connectorId),
       event,
     }))
     .filter((item) => item.status && !Number.isNaN(item.time))
@@ -2860,7 +2878,8 @@ function sessionStatusIntervals(session, connectorId = null) {
     return time >= range.start && time <= range.end;
   });
   const relevant = statusBefore.slice(-1).concat(during);
-  return connectorIntervals(relevant, connId, range.end).filter((interval) => interval.end > range.start && interval.time < range.end);
+  return connectorIntervals(relevant, connId, range.end, sessionConnectorState)
+    .filter((interval) => interval.end > range.start && interval.time < range.end);
 }
 
 function sessionStripSegments(session) {
@@ -2961,7 +2980,7 @@ function sessionVerdict(session) {
   return session.status ? `Session status: ${session.status}.` : '';
 }
 
-function analyzeSession(transactionId) {
+function analyzeSession(transactionId, { includeBehavior = false } = {}) {
   const session = (state.chargingSessions || []).find((item) => String(item.transactionId) === String(transactionId));
   if (!session) return null;
   const range = sessionRange(session);
@@ -2980,12 +2999,38 @@ function analyzeSession(transactionId) {
   const statusEvents = statusBefore.slice(-1).concat(during.filter((event) => event.eventName === 'STATUS_NOTIFICATION'));
   const intervals = connectorIntervals(statusEvents, connectorId, effectiveEnd).filter((interval) => interval.end > range.start && interval.time < effectiveEnd);
   const schedules = scheduleRecords(state.allEvents).filter((record) => record.transactionId === String(transactionId));
+  const smartChargingEnabled = session.smartChargingOverridden === true
+    || /smart/i.test(session.sessionType || '')
+    || /smart/i.test(session.mode || '')
+    || schedules.length > 0;
+  const behavior = includeBehavior ? window.chargingSessionBehaviorUtils.analyzeChargingSessionBehavior({
+    start: range.start,
+    end: effectiveEnd,
+    stateChanges: statusEvents.map((event) => ({
+      state: sessionConnectorState(event, connectorId),
+      at: new Date(event.timestamp).getTime(),
+      eventId: event.id,
+    })),
+    events: during.map((event) => ({
+      id: event.id,
+      eventName: String(event.eventName || 'Unknown'),
+      at: new Date(event.timestamp).getTime(),
+    })),
+    opportunities: schedules.flatMap((schedule) => schedule.periods.map((period) => ({
+      start: period.time,
+      end: period.end,
+      power: period.power,
+      eventId: schedule.id,
+    }))),
+    sessionEnergyKwh: Number.isFinite(Number(session.consumption)) ? Number(session.consumption) : null,
+    smartChargingEnabled,
+  }) : null;
   const other = during.filter((event) => event.eventName !== 'STATUS_NOTIFICATION');
   const counts = new Map();
   other.forEach((event) => counts.set(event.eventName, (counts.get(event.eventName) || 0) + 1));
   return {
     session, range: { start: range.start, end: effectiveEnd }, nominalRange: range, connectorId, intervals, schedules,
-    smart: /smart/i.test(session.sessionType || '') || /smart/i.test(session.mode || '') || schedules.length > 0,
+    smart: smartChargingEnabled,
     events: during,
     importantCount: during.filter((event) => eventImportance(event) === 'Important').length,
     counts,
@@ -2993,11 +3038,12 @@ function analyzeSession(transactionId) {
     endDiagnosis: diagnoseSessionEndFromData(session, during, intervals),
     statusAfter: after,
     verdict: sessionVerdict(session),
+    behavior,
   };
 }
 
 function openSessionAnalysis(transactionId) {
-  const analysis = analyzeSession(transactionId);
+  const analysis = analyzeSession(transactionId, { includeBehavior: true });
   const panel = document.getElementById('sessionAnalysis');
   const body = document.getElementById('sessionAnalysisBody');
   if (!analysis || !panel || !body) {
@@ -3035,6 +3081,68 @@ function analysisBars(periods, view, colorFor) {
   }).join('');
 }
 
+function renderSessionBehavior(behavior) {
+  if (!behavior || !behavior.segments.length) {
+    return '<section class="session-behavior"><h3>Session behavior</h3><p class="empty-state">No timestamped connector-state sequence is available for this session.</p></section>';
+  }
+  const roleColor = {
+    charging: 'var(--success)',
+    'connected-waiting': 'var(--warning)',
+    unavailable: 'var(--danger)',
+    available: 'var(--primary)',
+    unknown: 'var(--muted)',
+  };
+  const totalDuration = Math.max(behavior.range.durationMs, 1);
+  const visibleSegments = behavior.segments.slice(0, 24);
+  const timeline = visibleSegments.map((segment) => {
+    const width = Math.max(segment.durationMs / totalDuration * 100, 0.5);
+    const title = `${segment.state} · ${formatExact(segment.start)} – ${formatExact(segment.end)} · ${formatDuration(0, segment.durationMs)}`;
+    return `<span class="session-behavior-segment role-${segment.role}" style="flex:${width} 1 0%;background:${roleColor[segment.role]};" title="${escapeHtml(title)}"></span>`;
+  }).join('');
+  const sequence = visibleSegments.map((segment, index) => `
+    ${index ? '<span class="session-behavior-arrow" aria-hidden="true">→</span>' : ''}
+    <span class="session-behavior-state role-${segment.role}" title="${escapeHtml(formatDuration(0, segment.durationMs))}">${escapeHtml(segment.state)}</span>
+  `).join('');
+  const extraSegments = Math.max(0, behavior.segments.length - visibleSegments.length);
+  const durations = behavior.stateDurations.slice(0, 8).map((item) => `
+    <div class="session-behavior-duration-row">
+      <span class="session-behavior-state role-${item.role}">${escapeHtml(item.state)}</span>
+      <span>${escapeHtml(formatDuration(0, item.durationMs))}</span>
+      <span>${item.occurrences} occurrence${item.occurrences === 1 ? '' : 's'} · longest ${escapeHtml(formatDuration(0, item.longestMs))}</span>
+    </div>
+  `).join('');
+  const findingBlocks = behavior.findings.slice(0, 3).map((finding) => `
+    <div class="session-behavior-finding">
+      <h4>${escapeHtml(finding.title)}</h4>
+      <p>${escapeHtml(finding.summary)}</p>
+      ${finding.uncertainty?.length ? `<p class="session-behavior-qualified">${finding.uncertainty.slice(0, 2).map(escapeHtml).join(' ')}</p>` : ''}
+      ${finding.evidenceIds.length ? `<div class="session-behavior-evidence">${finding.evidenceIds.slice(0, 6).map((id) => `<button type="button" class="session-behavior-evidence-link" data-session-behavior-event="${escapeHtml(id)}">Inspect event ${escapeHtml(id)}</button>`).join('')}</div>` : ''}
+    </div>
+  `).join('');
+  const unknowns = behavior.unknowns.slice(0, 4);
+  const energy = behavior.sessionEnergyKwh == null ? 'Session-level energy: unavailable.' : `Session energy total: ${Number(behavior.sessionEnergyKwh).toFixed(2)} kWh.`;
+  return `
+    <section class="session-behavior" aria-labelledby="sessionBehaviorHeading">
+      <div class="session-behavior-heading">
+        <div><h3 id="sessionBehaviorHeading">Session behavior</h3><p>Observed connector sequence and timing</p></div>
+        <span>${escapeHtml(formatDuration(behavior.range.start, behavior.range.end))}</span>
+      </div>
+      <div class="session-behavior-timeline" role="img" aria-label="Connector state timeline">${timeline}</div>
+      <div class="session-behavior-sequence">${sequence}${extraSegments ? `<span class="session-behavior-more">+${extraSegments} transitions</span>` : ''}</div>
+      <details class="session-behavior-details">
+        <summary>State durations and transitions</summary>
+        <div class="session-behavior-duration-list">${durations || '<p class="empty-state">No state durations available.</p>'}</div>
+        <div class="session-behavior-transition-list">
+          ${behavior.transitions.slice(0, 16).map((transition) => `<div><span>${escapeHtml(transition.fromState)} → ${escapeHtml(transition.toState)}</span><time>${escapeHtml(formatGlanceTimestamp(new Date(transition.at).toISOString()))}</time></div>`).join('')}
+          ${behavior.transitions.length > 16 ? `<span class="session-behavior-more">+${behavior.transitions.length - 16} transitions</span>` : ''}
+        </div>
+      </details>
+      ${findingBlocks}
+      <p class="session-behavior-unknowns">${escapeHtml(energy)} ${unknowns.map(escapeHtml).join(' ')}</p>
+    </section>
+  `;
+}
+
 function paintSessionAnalysis(scroll) {
   const analysis = state.sessionAnalysis;
   const body = document.getElementById('sessionAnalysisBody');
@@ -3057,6 +3165,7 @@ function paintSessionAnalysis(scroll) {
   });
   const verdict = sessionVerdict(session);
   const verdictBlock = verdict ? `<div class="analysis-verdict">${escapeHtml(verdict)}</div>` : '';
+  const behaviorBlock = renderSessionBehavior(analysis.behavior);
   const selected = analysis.schedules.find((item) => item.id === analysis.selectedSchedule);
   const lanes = connectorStateList(analysis.connectorId).map((item) => {
     const bars = analysisBars(analysis.intervals.filter((interval) => interval.status === item.id), view, statusColor);
@@ -3101,6 +3210,7 @@ function paintSessionAnalysis(scroll) {
       <div><dt>Smart charging</dt><dd>${escapeHtml(analysis.smart ? session.smartChargingOverridden ? 'Override active' : 'Active during this period' : 'Not indicated')}</dd></div>
     </dl>
     ${verdictBlock}
+    ${behaviorBlock}
     <p class="analysis-relationship">Session period → connector status → smart-charging schedule → related events</p>
     <div class="analysis-facts">
       <button type="button" id="analysisEvents">View related events</button>
@@ -3186,6 +3296,9 @@ function paintSessionAnalysis(scroll) {
     analysis.view = { ...analysis.range };
     paintSessionAnalysis(false);
     updateFloatingTimeToolbar('sessionAnalysis', analysis.view.start, analysis.view.end);
+  });
+  body.querySelectorAll('[data-session-behavior-event]').forEach((button) => {
+    button.addEventListener('click', () => focusEvent(button.dataset.sessionBehaviorEvent));
   });
   body.querySelector('#analysisEvents').addEventListener('click', () => {
     applyWindowDates(analysis.range.start, analysis.range.end, true);
@@ -4650,7 +4763,8 @@ function buildCompactInvestigationPacket() {
   }).sort((left, right) => right.score - left.score || right.recency - left.recency).slice(0, 8);
   selectedEvents.forEach(({ event }) => addEventEvidence(event));
   const sessionSummaries = sessionRecords.map((session) => {
-    const analysis = analyzeSession(session.transactionId);
+    const analysis = analyzeSession(session.transactionId, { includeBehavior: true });
+    const detailed = summarizeAssistantSession(session, true, analysis);
     return {
       id: String(session.transactionId).slice(0, 200),
       status: String(session.status || 'Unknown').slice(0, 60),
@@ -4660,6 +4774,7 @@ function buildCompactInvestigationPacket() {
       energyKwh: session.consumption ?? null,
       diagnosis: analysis ? `${analysis.startDiagnosis.classification}/${analysis.endDiagnosis.classification}` : 'unavailable',
       smartCharging: Boolean(analyzeSmartChargingImpact(session.transactionId)),
+      ...(detailed?.behavior ? { behavior: detailed.behavior } : {}),
     };
   });
   const connectorRecords = derived.connectors.map((connector) => {
@@ -4952,33 +5067,175 @@ function renderSmartInvestigations() {
   renderSmartChat();
 }
 
-function summarizeAssistantSession(session) {
+function summarizeAssistantSession(session, includeBehavior = false, precomputedAnalysis = undefined) {
   if (!session) return null;
   const id = String(session.transactionId ?? '');
-  const analysis = id ? analyzeSession(id) : null;
+  const analysis = precomputedAnalysis === undefined
+    ? id && includeBehavior ? analyzeSession(id, { includeBehavior: true }) : null
+    : precomputedAnalysis;
+  const behavior = analysis?.behavior;
   const auth = formatAuthMode(session.authMode || session.mode);
   const durationSeconds = Number(session.duration);
+  const behaviorSummary = behavior && includeBehavior ? {
+    sequence: behavior.sequence.slice(0, 12).map((state) => String(state).slice(0, 80)),
+    segments: behavior.segments.slice(0, 8).map((segment) => ({
+      state: String(segment.state).slice(0, 80),
+      role: segment.role,
+      start: new Date(segment.start).toISOString(),
+      end: new Date(segment.end).toISOString(),
+      durationMs: segment.durationMs,
+      eventIds: Array.from(new Set([
+        ...segment.eventIds,
+        ...segment.relatedEvents.map((event) => event.id).filter(Boolean),
+      ])).slice(0, 3),
+      relatedEvents: segment.relatedEvents.slice(0, 1).map((event) => ({
+        id: event.id,
+        name: String(event.name).slice(0, 80),
+        at: new Date(event.at).toISOString(),
+      })),
+    })),
+    transitions: behavior.transitions.slice(0, 12).map((transition) => ({
+      fromState: String(transition.fromState).slice(0, 80),
+      toState: String(transition.toState).slice(0, 80),
+      at: new Date(transition.at).toISOString(),
+      eventId: transition.eventId,
+    })),
+    repeatedTransitions: behavior.repeatedTransitions.slice(0, 4).map((transition) => ({
+      fromState: String(transition.fromState).slice(0, 80),
+      toState: String(transition.toState).slice(0, 80),
+      occurrences: transition.occurrences,
+      eventIds: transition.eventIds.slice(0, 4),
+    })),
+    stateDurations: behavior.stateDurations.slice(0, 6).map((item) => ({
+      state: String(item.state).slice(0, 80),
+      role: item.role,
+      occurrences: item.occurrences,
+      durationMs: item.durationMs,
+      longestMs: item.longestMs,
+    })),
+    findings: behavior.findings.slice(0, 3).map((finding) => ({
+      kind: finding.kind,
+      title: finding.title.slice(0, 100),
+      summary: finding.summary.slice(0, 300),
+      impactMs: finding.impactMs ?? null,
+      opportunityMs: finding.opportunityMs ?? null,
+      opportunityShare: finding.opportunityShare ?? null,
+      states: finding.states?.slice(0, 6) ?? [],
+      fromState: finding.fromState ?? null,
+      toState: finding.toState ?? null,
+      occurrences: finding.occurrences ?? null,
+      evidenceIds: finding.evidenceIds.slice(0, 4),
+      uncertainty: finding.uncertainty.slice(0, 3).map((item) => item.slice(0, 180)),
+    })),
+    intervalPowerAvailable: behavior.intervalPowerAvailable,
+    opportunity: {
+      source: behavior.opportunity.source,
+      durationMs: behavior.opportunity.durationMs,
+      connectedNonChargingMs: behavior.opportunity.connectedNonChargingMs,
+      connectedNonChargingShare: behavior.opportunity.connectedNonChargingShare,
+      byState: behavior.opportunity.byState.slice(0, 3).map((item) => ({
+        state: String(item.state).slice(0, 80),
+        role: item.role,
+        durationMs: item.durationMs,
+      })),
+      findings: behavior.opportunity.findings.slice(0, 1).map((finding) => ({
+        summary: finding.summary.slice(0, 300),
+        evidenceIds: finding.evidenceIds.slice(0, 4),
+      })),
+    },
+    unknowns: behavior.unknowns.slice(0, 3).map((item) => String(item).slice(0, 160)),
+  } : null;
   return {
     id: id.slice(0, 200),
     status: String(session.status || 'Unknown').slice(0, 60),
     connectorId: sessionConnectorId(session),
     start: session.startTime ? String(session.startTime).slice(0, 40) : null,
     end: session.stopTime ? String(session.stopTime).slice(0, 40) : null,
-    energyKwh: Number.isFinite(Number(session.consumption)) ? Number(session.consumption) : null,
+    energyKwh: session.consumption == null || session.consumption === ''
+      ? null : Number.isFinite(Number(session.consumption)) ? Number(session.consumption) : null,
     diagnosis: analysis ? `${analysis.startDiagnosis.classification}/${analysis.endDiagnosis.classification}` : 'unavailable',
     smartCharging: Boolean(analysis?.smart),
     stopReason: session.stopReason ? String(session.stopReason).slice(0, 100) : null,
     authMode: auth.label === '—' ? null : auth.label,
-    durationSeconds: Number.isFinite(durationSeconds) && durationSeconds >= 0 ? durationSeconds : null,
+    durationSeconds: session.duration == null || session.duration === ''
+      ? null : Number.isFinite(durationSeconds) && durationSeconds >= 0 ? durationSeconds : null,
     startDiagnosis: analysis?.startDiagnosis.classification || null,
     endDiagnosis: analysis?.endDiagnosis.classification || null,
     verdict: analysis?.verdict ? String(analysis.verdict).slice(0, 300) : null,
     eventCount: analysis?.events.length || 0,
     importantEventCount: analysis?.importantCount || 0,
+    ...(behaviorSummary ? { behavior: behaviorSummary } : {}),
   };
 }
 
-function buildAssistantSessionFocus(requestedSessionId = null) {
+function compactAssistantSessionForChat(session) {
+  if (!session?.behavior) return session;
+  const behavior = session.behavior;
+  return {
+    id: session.id,
+    status: session.status,
+    connectorId: session.connectorId,
+    start: session.start,
+    end: session.end,
+    energyKwh: session.energyKwh,
+    diagnosis: session.diagnosis,
+    smartCharging: session.smartCharging,
+    stopReason: session.stopReason,
+    durationSeconds: session.durationSeconds,
+    startDiagnosis: session.startDiagnosis,
+    endDiagnosis: session.endDiagnosis,
+    eventCount: session.eventCount,
+    behavior: {
+      sequence: behavior.sequence.slice(0, 8),
+      segments: behavior.segments.slice(0, 4).map((segment) => ({
+        state: segment.state,
+        role: segment.role,
+        start: segment.start,
+        end: segment.end,
+        durationMs: segment.durationMs,
+        eventIds: segment.eventIds.slice(0, 2),
+      })),
+      transitions: behavior.transitions.slice(0, 5),
+      repeatedTransitions: behavior.repeatedTransitions.slice(0, 2).map((transition) => ({
+        fromState: transition.fromState,
+        toState: transition.toState,
+        occurrences: transition.occurrences,
+        eventIds: transition.eventIds.slice(0, 3),
+      })),
+      stateDurations: behavior.stateDurations.slice(0, 4),
+      findings: behavior.findings.slice(0, 2).map((finding) => ({
+        kind: finding.kind,
+        title: finding.title.slice(0, 80),
+        summary: finding.summary.slice(0, 160),
+        impactMs: finding.impactMs ?? null,
+        opportunityMs: finding.opportunityMs ?? null,
+        opportunityShare: finding.opportunityShare ?? null,
+        states: finding.states?.slice(0, 4) ?? [],
+        fromState: finding.fromState ?? null,
+        toState: finding.toState ?? null,
+        occurrences: finding.occurrences ?? null,
+        evidenceIds: finding.evidenceIds.slice(0, 3),
+        uncertainty: finding.uncertainty.slice(0, 1).map((item) => item.slice(0, 100)),
+      })),
+      intervalPowerAvailable: behavior.intervalPowerAvailable,
+      opportunity: {
+        source: behavior.opportunity.source,
+        durationMs: behavior.opportunity.durationMs,
+        connectedNonChargingMs: behavior.opportunity.connectedNonChargingMs,
+        connectedNonChargingShare: behavior.opportunity.connectedNonChargingShare,
+        byState: behavior.opportunity.byState.slice(0, 2).map((item) => ({
+          state: item.state,
+          role: item.role,
+          durationMs: item.durationMs,
+        })),
+        findings: [],
+      },
+      unknowns: behavior.unknowns.slice(0, 2).map((item) => item.slice(0, 100)),
+    },
+  };
+}
+
+function buildAssistantSessionFocus(requestedSessionId = null, includeBehavior = false, includePreviousBehavior = false) {
   const range = selectedWindow();
   const start = rangeMilliseconds(range.start, Number.NEGATIVE_INFINITY);
   const end = rangeMilliseconds(range.end, Date.now());
@@ -4999,8 +5256,8 @@ function buildAssistantSessionFocus(requestedSessionId = null) {
   return {
     source: focus.source,
     ...(focus.requestedSessionId ? { requestedSessionId: focus.requestedSessionId } : {}),
-    session: summarizeAssistantSession(focus.session),
-    previous: summarizeAssistantSession(focus.previous),
+    session: summarizeAssistantSession(focus.session, includeBehavior),
+    previous: summarizeAssistantSession(focus.previous, includePreviousBehavior),
   };
 }
 
@@ -5237,7 +5494,6 @@ function resetSmartInvestigation() {
 function buildChatContext(question, investigationPacket) {
   const normalized = question.toLowerCase();
   const requestedSessionId = window.dashboardAssistantUtils.extractRequestedSessionId(question);
-  const sessionFocus = buildAssistantSessionFocus(requestedSessionId);
   const words = normalized.match(/[a-z0-9]{3,}/g) || [];
   const findings = state.smartInvestigation.findings.slice(0, 3).map((finding) => ({
     id: finding.id,
@@ -5257,9 +5513,20 @@ function buildChatContext(question, investigationPacket) {
   }).sort((left, right) => right.score - left.score || left.index - right.index)
     .slice(0, 16).map(({ item }) => item);
   const wantsEvents = /event|when|time|history|trend|recent|occur|timeline/.test(normalized);
-  const wantsSessions = /session|charge|start|stop|energy|kwh|authorization/.test(normalized);
+  const wantsSessions = /session|charg(?:e|er|ing)|start|stop|energy|kwh|authorization|suspend|resum|state|transition|sequence/.test(normalized);
   const wantsPower = /power|limit|kw|schedule|smart charg|current/.test(normalized);
   const wantsDiagnostics = /diagnos|health|fault|error|offline|connect|connector|incident|problem|issue/.test(normalized);
+  const compareSessions = /compare|previous|before|earlier/.test(normalized);
+  const rawSessionFocus = buildAssistantSessionFocus(
+    requestedSessionId,
+    wantsSessions || wantsPower || compareSessions || Boolean(requestedSessionId),
+    compareSessions
+  );
+  const sessionFocus = {
+    ...rawSessionFocus,
+    session: compactAssistantSessionForChat(rawSessionFocus.session),
+    previous: compactAssistantSessionForChat(rawSessionFocus.previous),
+  };
   const referencedIds = (type) => new Set(findings.flatMap((finding) => finding.evidence
     .filter((item) => item.type === type).map((item) => String(item.id))));
   const references = (type) => referencedIds(type).size > 0;
@@ -5290,7 +5557,9 @@ function buildChatContext(question, investigationPacket) {
       source: investigationPacket.sessions.source,
       statusCounts: wantsSessions ? investigationPacket.sessions.statusCounts : {},
       selected: sessionFocus.source === 'requested'
-        ? [] : compactRecords('session', investigationPacket.sessions.selected, wantsSessions),
+        ? [] : compactRecords('session', investigationPacket.sessions.selected, wantsSessions)
+          .filter((session) => session.id !== sessionFocus.session?.id && session.id !== sessionFocus.previous?.id)
+          .map(({ behavior, ...session }) => session),
       focus: sessionFocus,
     },
     connectors: compactRecords('connector', investigationPacket.connectors, wantsDiagnostics),
@@ -5302,14 +5571,14 @@ function buildChatContext(question, investigationPacket) {
     evidence,
   };
   const payload = {
-    context: reduceSmartInvestigationPacket(context, 1_000, 1_500, findingEvidence, protectedRecords),
+    context: reduceSmartInvestigationPacket(context, 3_500, 5_500, findingEvidence, protectedRecords),
     findings,
     question,
   };
-  if (payload.context && estimateSmartInvestigationTokens(payload) > 2_000) {
-    payload.context = reduceSmartInvestigationPacket(payload.context, 700, 900, findingEvidence, protectedRecords);
+  if (payload.context && estimateSmartInvestigationTokens(payload) > 6_500) {
+    payload.context = reduceSmartInvestigationPacket(payload.context, 4_000, 5_500, findingEvidence, protectedRecords);
   }
-  if (payload.context && estimateSmartInvestigationTokens(payload) > 2_000) payload.context = null;
+  if (payload.context && estimateSmartInvestigationTokens(payload) > 7_000) payload.context = null;
   return payload;
 }
 
@@ -7552,7 +7821,8 @@ function statusTone(value, kind) {
 }
 
 function formatPeaks(peaks) {
-  if (peaks == null || peaks === '' || (Array.isArray(peaks) && !peaks.length) || (typeof peaks === 'object' && !Array.isArray(peaks) && !Object.keys(peaks).length)) {
+  if (peaks == null || peaks === '' || (Array.isArray(peaks) && !peaks.length)
+      || (typeof peaks === 'object' && !Array.isArray(peaks) && !Object.keys(peaks).length)) {
     return 'No peak set';
   }
   return displayValue(peaks);

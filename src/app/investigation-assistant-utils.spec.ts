@@ -14,12 +14,17 @@ describe('investigation-assistant-utils', () => {
     };
     expect(hasInvestigableSignal(healthy)).toBe(false);
     expect(hasInvestigableSignal({ ...healthy, sessions: { selected: [{ status: 'TimedOut' }] } })).toBe(true);
+    expect(hasInvestigableSignal({ ...healthy, sessions: { selected: [{ status: 'Completed', behavior: { findings: [{ kind: 'opportunity-overlap' }] } }] } })).toBe(true);
+    expect(hasInvestigableSignal({ ...healthy, sessions: { selected: [{ status: 'Completed', behavior: { findings: [{ kind: 'repeated-transition', occurrences: 4 }] } }] } })).toBe(false);
     expect(hasInvestigableSignal({ ...healthy, diagnostics: [{ status: 'ATTENTION' }] })).toBe(true);
     expect(hasInvestigableSignal({ ...healthy, events: { source: 'partial' } })).toBe(true);
   });
 
   it('classifies permanent configuration errors and bounded transient retries', () => {
     expect(classifyAssistantFailure('not_configured').retryable).toBe(false);
+    expect(classifyAssistantFailure('invalid_request')).toMatchObject({ retryable: false, delayMs: 0 });
+    expect(classifyAssistantFailure('provider_invalid_request')).toMatchObject({ retryable: false, delayMs: 0 });
+    expect(classifyAssistantFailure('internal_error').retryable).toBe(true);
     expect(classifyAssistantFailure('provider_timeout', 0).delayMs).toBe(3_000);
     expect(classifyAssistantFailure('provider_unavailable', 1).delayMs).toBe(10_000);
     expect(classifyAssistantFailure('provider_rate_limited', 0, 120).delayMs).toBe(120_000);

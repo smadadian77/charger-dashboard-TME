@@ -24,6 +24,9 @@ interface AssistantSignalPacket {
       verdict?: string;
       startDiagnosis?: string;
       endDiagnosis?: string;
+      behavior?: {
+        findings?: Array<{ kind?: string; occurrences?: number | null }>;
+      } | null;
     }>;
   };
   diagnostics?: Array<{ status?: string }>;
@@ -54,6 +57,9 @@ export function hasInvestigableSignal(packet: AssistantSignalPacket): boolean {
       session.endDiagnosis,
       session.verdict
     ].filter(Boolean).join(' '))
+    || session.behavior?.findings?.some((finding) =>
+      finding.kind === 'opportunity-overlap'
+    )
   ));
 }
 
@@ -69,6 +75,12 @@ export function classifyAssistantFailure(
       return { message: 'AI investigation is not configured for this dashboard.', retryable: false, delayMs: 0 };
     case 'provider_auth':
       return { message: 'AI service authentication failed. Check the dashboard configuration.', retryable: false, delayMs: 0 };
+    case 'invalid_request':
+      return { message: 'The dashboard rejected the assistant request. Refresh data or reduce the selected time range.', retryable: false, delayMs: 0 };
+    case 'provider_invalid_request':
+      return { message: 'The AI service rejected this request. Check the configured model and request settings.', retryable: false, delayMs: 0 };
+    case 'internal_error':
+      return { message: 'The dashboard assistant encountered an internal error.', retryable: true, delayMs: retryDelay };
     case 'provider_rate_limited':
     case 'local_rate_limited':
       return { message: 'The AI request limit was reached.', retryable: true, delayMs: retryDelay };

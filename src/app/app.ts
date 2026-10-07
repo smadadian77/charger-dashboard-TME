@@ -3,6 +3,7 @@ import { RouterOutlet } from '@angular/router';
 import { initializeDashboardWhenReady } from './dashboard-bootstrap';
 import { findSerialSuggestions, isValidChargerSerial, normalizeSerialNumber } from './serial-number-utils';
 import { classifyAssistantFailure, extractRequestedSessionId, hasInvestigableSignal, resolveFocusSessions } from './investigation-assistant-utils';
+import { analyzeChargingSessionBehavior } from './charging-session-behavior';
 
 declare global {
   interface Window {
@@ -18,6 +19,9 @@ declare global {
       extractRequestedSessionId: typeof extractRequestedSessionId;
       hasInvestigableSignal: typeof hasInvestigableSignal;
       resolveFocusSessions: typeof resolveFocusSessions;
+    };
+    chargingSessionBehaviorUtils?: {
+      analyzeChargingSessionBehavior: typeof analyzeChargingSessionBehavior;
     };
   }
 }
@@ -36,6 +40,7 @@ export class App implements AfterViewInit {
   ngAfterViewInit(): void {
     window.dashboardSerialUtils = { findSerialSuggestions, isValidChargerSerial, normalizeSerialNumber };
     window.dashboardAssistantUtils = { classifyAssistantFailure, extractRequestedSessionId, hasInvestigableSignal, resolveFocusSessions };
+    window.chargingSessionBehaviorUtils = { analyzeChargingSessionBehavior };
     const script = document.createElement('script');
     script.src = `/dashboard-engine.js?v=${Date.now()}`;
     script.async = true;

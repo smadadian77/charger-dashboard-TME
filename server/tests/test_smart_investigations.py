@@ -57,6 +57,54 @@ def investigation_packet():
     }
 
 
+def session_behavior_summary():
+    return {
+        "sequence": ["Preparing", "SuspendedEV", "Charging"],
+        "transitions": [
+            {"fromState": "Preparing", "toState": "SuspendedEV", "at": "2026-10-06T02:00:00Z", "eventId": "state-suspend"},
+            {"fromState": "SuspendedEV", "toState": "Charging", "at": "2026-10-06T02:47:00Z", "eventId": "state-resume"},
+        ],
+        "repeatedTransitions": [],
+        "stateDurations": [{
+            "state": "SuspendedEV", "role": "connected-waiting", "occurrences": 1,
+            "durationMs": 2_820_000, "longestMs": 2_820_000,
+        }],
+        "segments": [{
+            "state": "SuspendedEV",
+            "role": "connected-waiting",
+            "start": "2026-10-06T02:00:00Z",
+            "end": "2026-10-06T02:47:00Z",
+            "durationMs": 2_820_000,
+            "eventIds": ["state-suspend", "state-resume"],
+            "relatedEvents": [{"id": "state-resume", "name": "STATUS_NOTIFICATION", "at": "2026-10-06T02:47:00Z"}],
+        }],
+        "opportunity": {
+            "source": "positive-power profile periods",
+            "durationMs": 3_600_000,
+            "connectedNonChargingMs": 2_820_000,
+            "connectedNonChargingShare": 0.7833,
+            "byState": [{"state": "SuspendedEV", "role": "connected-waiting", "durationMs": 2_820_000}],
+            "findings": [{"summary": "Observed state overlapped a positive-power profile period.", "evidenceIds": ["state-suspend", "state-resume"]}],
+        },
+        "findings": [{
+            "kind": "opportunity-overlap",
+            "title": "Charging opportunity overlapped a non-charging state",
+            "summary": "SuspendedEV overlapped a positive-power profile period.",
+            "impactMs": 2_820_000,
+            "opportunityMs": 3_600_000,
+            "opportunityShare": 0.7833,
+            "states": ["SuspendedEV"],
+            "fromState": None,
+            "toState": None,
+            "occurrences": None,
+            "evidenceIds": ["state-suspend", "state-resume"],
+            "uncertainty": ["The cause is not confirmed."],
+        }],
+        "intervalPowerAvailable": False,
+        "unknowns": ["The telemetry does not establish why the state persisted."],
+    }
+
+
 class SmartInvestigationTests(unittest.TestCase):
     def setUp(self):
         with smart_investigations._rate_lock:
@@ -66,6 +114,34 @@ class SmartInvestigationTests(unittest.TestCase):
         packet = investigation_packet()
 
         self.assertIs(smart_investigations.validate_context(packet), packet)
+
+    def test_context_accepts_bounded_session_behavior_summary(self):
+        packet = investigation_packet()
+        packet["sessions"]["focus"]["session"]["behavior"] = session_behavior_summary()
+
+        self.assertIs(smart_investigations.validate_context(packet), packet)
+
+    def test_context_rejects_unbounded_session_behavior_segments(self):
+        packet = investigation_packet()
+        packet["sessions"]["focus"]["session"]["behavior"] = session_behavior_summary()
+        packet["sessions"]["focus"]["session"]["behavior"]["segments"] *= 13
+
+        with self.assertRaisesRegex(ValueError, "session behavior"):
+            smart_investigations.validate_context(packet)
+
+    def test_context_rejects_invalid_session_behavior_metrics(self):
+        packet = investigation_packet()
+        packet["sessions"]["focus"]["session"]["behavior"] = session_behavior_summary()
+        packet["sessions"]["focus"]["session"]["behavior"]["findings"][0]["opportunityShare"] = 1.5
+
+        with self.assertRaisesRegex(ValueError, "session behavior"):
+            smart_investigations.validate_context(packet)
+
+        packet = investigation_packet()
+        packet["sessions"]["focus"]["session"]["behavior"] = session_behavior_summary()
+        del packet["sessions"]["focus"]["session"]["behavior"]["transitions"]
+        with self.assertRaisesRegex(ValueError, "unsupported fields"):
+            smart_investigations.validate_context(packet)
 
     def test_context_rejects_unapproved_focus_fields_and_source(self):
         packet = investigation_packet()
@@ -177,6 +253,8 @@ class SmartInvestigationTests(unittest.TestCase):
 
     def test_chat_prompt_includes_focus_and_previous_session_without_history(self):
         packet = investigation_packet()
+        packet["sessions"]["focus"]["session"]["smartCharging"] = True
+        packet["sessions"]["focus"]["session"]["behavior"] = session_behavior_summary()
         with patch("smart_investigations._generate", return_value="The selected session timed out.") as generate:
             result = smart_investigations.answer_question(packet, [], "Why did this session fail?", "chat-focus-test")
 
@@ -185,6 +263,14 @@ class SmartInvestigationTests(unittest.TestCase):
         self.assertEqual(prompt["packet"]["sessions"]["focus"]["source"], "selected")
         self.assertEqual(prompt["packet"]["sessions"]["focus"]["session"]["stopReason"], "Timeout")
         self.assertEqual(prompt["packet"]["sessions"]["focus"]["previous"]["id"], "previous-session")
+        self.assertEqual(prompt["packet"]["sessions"]["focus"]["session"]["behavior"]["sequence"], ["Preparing", "SuspendedEV", "Charging"])
+        self.assertIn("A positive-power profile period is not proof", generate.call_args.args[1])
+        self.assertIn("Do not infer a vehicle schedule or intent", generate.call_args.args[1])
+        self.assertTrue(prompt["packet"]["sessions"]["focus"]["session"]["smartCharging"])
+        self.assertIn("treat SuspendedEV and SuspendedEVSE as charger-imposed smart-control states", generate.call_args.args[1])
+        self.assertIn("takes priority over a positive-power profile period", generate.call_args.args[1])
+        self.assertIn("Do not describe these periods as the EV refusing or failing to draw power", generate.call_args.args[1])
+        self.assertIn("do not label repetition abnormal without separate fault evidence", generate.call_args.args[1])
 
     def test_chat_prompt_keeps_an_unloaded_requested_session_explicit(self):
         packet = investigation_packet()

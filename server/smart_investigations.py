@@ -26,9 +26,9 @@ REQUEST_TIMEOUT_SECONDS = 25
 RATE_LIMIT_WINDOW_SECONDS = 60
 RATE_LIMIT_REQUESTS = 12
 
-SYSTEM_INSTRUCTION = """Interpret only this compact, precomputed EV charger investigation packet. The dashboard has already calculated statistics and patterns; do not recalculate them. Distinguish facts from possibilities, never invent causes or details, and cite only supplied evidence IDs. Surface a finding only when the packet contains a meaningful abnormal signal; return an empty findings list when the supplied data does not support one. Do not manufacture anomalies to make the response active. Do not create a finding that merely restates an aggregate diagnostic status or lists diagnostic categories; name a specific observed condition and its concrete evidence, or omit it. Return at most 3 concise findings, each with a one-sentence summary and a short next step or null."""
+SYSTEM_INSTRUCTION = """Interpret only this compact, precomputed EV charger investigation packet. The dashboard has already calculated statistics and patterns; do not recalculate them. Distinguish facts from possibilities, never invent causes or details, and cite only supplied evidence IDs. Surface a finding only when the packet contains a meaningful abnormal signal; return an empty findings list when the supplied data does not support one. Do not manufacture anomalies to make the response active. Do not create a finding that merely restates an aggregate diagnostic status or lists diagnostic categories; name a specific observed condition and its concrete evidence, or omit it. A connector state or overlap with a charger profile is not a root cause; do not infer vehicle schedule or intent from charger-side profile data. Return at most 3 concise findings, each with a one-sentence summary and a short next step or null."""
 
-CHAT_INSTRUCTION = """Answer only from the compact, question-focused charger packet and supplied findings. When sessions.focus.source is requested, the user named sessions.focus.requestedSessionId; use only sessions.focus.session if it is present, and if it is absent say that exact session ID is not in the loaded data. Never substitute the latest session for a specifically requested ID. For other focus sources, state whether the session was selected by the user or assumed to be the latest when that distinction helps answer the question. Compare sessions.focus.previous only when it is present. If the requested session or comparison data is absent, say so instead of guessing. Do not invent facts or claim unsupported causation. Prefer 1-3 concise sentences and never exceed 5 sentences. Return plain text only; do not reveal chain-of-thought."""
+CHAT_INSTRUCTION = """Answer only from the compact, question-focused charger packet and supplied findings. When sessions.focus.source is requested, the user named sessions.focus.requestedSessionId; use only sessions.focus.session if it is present, and if it is absent say that exact session ID is not in the loaded data. Never substitute the latest session for a specifically requested ID. For other focus sources, state whether the session was selected by the user or assumed to be the latest when that distinction helps answer the question. Compare sessions.focus.previous only when it is present. When behavior data is supplied, reconstruct what happened from its sequence, timed segments, transitions, repeated transitions, related events, and state durations. Transitions and repeated transitions are descriptive timeline data, not findings by themselves; do not label repetition abnormal without separate fault evidence. For a session with smartCharging=true, treat SuspendedEV and SuspendedEVSE as charger-imposed smart-control states; SuspendedEVSE can be commanded by backend smart charging to hold charging. This state is the effective charger command and takes priority over a positive-power profile period. Do not describe these periods as the EV refusing or failing to draw power, or as an independent vehicle-side non-charging opportunity. Explain that interval energy/draw cannot be determined without interval-level metering. A positive-power profile period is not proof that the vehicle requested or could accept energy, and session-total energy does not establish interval-level delivery. Do not infer a vehicle schedule or intent from a charger-side profile. Distinguish observed behavior, supported impact, possible explanations, and unknowns; do not infer why a state persisted from its label alone. Do not invent facts or claim unsupported causation. Prefer 1-3 concise sentences and never exceed 5 sentences. Return plain text only; do not reveal chain-of-thought."""
 
 FINDINGS_SCHEMA = {
     "type": "object",
@@ -73,7 +73,7 @@ _EVIDENCE_TYPES = {"event", "session", "connector", "incident", "diagnostic"}
 _SESSION_SUMMARY_FIELDS = {
     "id", "status", "connectorId", "start", "end", "energyKwh", "diagnosis", "smartCharging",
     "stopReason", "authMode", "durationSeconds", "startDiagnosis", "endDiagnosis", "verdict",
-    "eventCount", "importantEventCount",
+    "eventCount", "importantEventCount", "behavior",
 }
 _AGGREGATE_DIAGNOSTIC_SUMMARY = re.compile(
     r"^\s*diagnostics?\s+report(?:s)?\s+an?\s+(?:attention|pass|fail)\s+status\s+for\b",
@@ -202,8 +202,8 @@ def _reject_secret_fields(value, depth=0):
         raise ValueError("Investigation context contains an oversized value.")
 
 
-def _require_fields(value, allowed):
-    if not isinstance(value, dict) or set(value) - set(allowed):
+def _require_fields(value, allowed, required=()):
+    if not isinstance(value, dict) or set(value) - set(allowed) or not set(required).issubset(value):
         raise ValueError("Investigation packet contains unsupported fields.")
 
 
@@ -234,6 +234,156 @@ def _validate_session_summary(value):
         item = value.get(key)
         if item is not None and (isinstance(item, bool) or not isinstance(item, int) or not 0 <= item <= 300):
             raise ValueError("Investigation session summary is invalid.")
+    behavior = value.get("behavior")
+    if behavior is None:
+        return
+    _require_fields(behavior, {
+        "sequence", "segments", "transitions", "repeatedTransitions", "stateDurations",
+        "findings", "intervalPowerAvailable", "opportunity", "unknowns",
+    }, required={
+        "sequence", "segments", "transitions", "repeatedTransitions", "stateDurations",
+        "findings", "intervalPowerAvailable", "opportunity", "unknowns",
+    })
+    sequence = behavior.get("sequence", [])
+    segments = behavior.get("segments", [])
+    transitions = behavior.get("transitions", [])
+    repeated_transitions = behavior.get("repeatedTransitions", [])
+    state_durations = behavior.get("stateDurations", [])
+    behavior_findings = behavior.get("findings", [])
+    unknowns = behavior.get("unknowns", [])
+    if not isinstance(sequence, list) or len(sequence) > 12 or any(not isinstance(item, str) or len(item) > 80 for item in sequence):
+        raise ValueError("Investigation session behavior is invalid.")
+    if not isinstance(segments, list) or len(segments) > 8:
+        raise ValueError("Investigation session behavior is invalid.")
+    if not isinstance(unknowns, list) or len(unknowns) > 3 or any(not isinstance(item, str) or len(item) > 160 for item in unknowns):
+        raise ValueError("Investigation session behavior is invalid.")
+    if (not isinstance(transitions, list) or len(transitions) > 12
+            or not isinstance(repeated_transitions, list) or len(repeated_transitions) > 4
+            or not isinstance(state_durations, list) or len(state_durations) > 6
+            or not isinstance(behavior_findings, list) or len(behavior_findings) > 3
+            or not isinstance(behavior.get("intervalPowerAvailable"), bool)):
+        raise ValueError("Investigation session behavior is invalid.")
+    allowed_roles = {"charging", "connected-waiting", "unavailable", "available", "unknown"}
+    for segment in segments:
+        _require_fields(segment, {"state", "role", "start", "end", "durationMs", "eventIds", "relatedEvents"})
+        if (not isinstance(segment.get("state"), str) or len(segment["state"]) > 80
+                or segment.get("role") not in allowed_roles):
+            raise ValueError("Investigation session behavior is invalid.")
+        for key in ("start", "end"):
+            if not isinstance(segment.get(key), str) or len(segment[key]) > 40:
+                raise ValueError("Investigation session behavior is invalid.")
+        duration = segment.get("durationMs")
+        if isinstance(duration, bool) or not isinstance(duration, (int, float)) or not math.isfinite(duration) or duration < 0:
+            raise ValueError("Investigation session behavior is invalid.")
+        event_ids = segment.get("eventIds", [])
+        related_events = segment.get("relatedEvents", [])
+        if not isinstance(event_ids, list) or len(event_ids) > 3 or any(not isinstance(item, str) or len(item) > 200 for item in event_ids):
+            raise ValueError("Investigation session behavior is invalid.")
+        if not isinstance(related_events, list) or len(related_events) > 1:
+            raise ValueError("Investigation session behavior is invalid.")
+        for event in related_events:
+            _require_fields(event, {"id", "name", "at"})
+            if event.get("id") is not None and (not isinstance(event["id"], str) or len(event["id"]) > 200):
+                raise ValueError("Investigation session behavior is invalid.")
+            if not isinstance(event.get("name"), str) or len(event["name"]) > 80:
+                raise ValueError("Investigation session behavior is invalid.")
+            if not isinstance(event.get("at"), str) or len(event["at"]) > 40:
+                raise ValueError("Investigation session behavior is invalid.")
+    for transition in transitions:
+        _require_fields(transition, {"fromState", "toState", "at", "eventId"})
+        if (not isinstance(transition.get("fromState"), str) or len(transition["fromState"]) > 80
+                or not isinstance(transition.get("toState"), str) or len(transition["toState"]) > 80
+                or not isinstance(transition.get("at"), str) or len(transition["at"]) > 40):
+            raise ValueError("Investigation session behavior is invalid.")
+        if transition.get("eventId") is not None and (not isinstance(transition["eventId"], str) or len(transition["eventId"]) > 200):
+            raise ValueError("Investigation session behavior is invalid.")
+    for transition in repeated_transitions:
+        _require_fields(transition, {"fromState", "toState", "occurrences", "eventIds"})
+        if (not isinstance(transition.get("fromState"), str) or len(transition["fromState"]) > 80
+                or not isinstance(transition.get("toState"), str) or len(transition["toState"]) > 80
+                or isinstance(transition.get("occurrences"), bool) or not isinstance(transition.get("occurrences"), int)
+                or not 2 <= transition["occurrences"] <= 300):
+            raise ValueError("Investigation session behavior is invalid.")
+        ids = transition.get("eventIds", [])
+        if not isinstance(ids, list) or len(ids) > 4 or any(not isinstance(item, str) or len(item) > 200 for item in ids):
+            raise ValueError("Investigation session behavior is invalid.")
+    for item in state_durations:
+        _require_fields(item, {"state", "role", "occurrences", "durationMs", "longestMs"})
+        if (not isinstance(item.get("state"), str) or len(item["state"]) > 80 or item.get("role") not in allowed_roles
+                or isinstance(item.get("occurrences"), bool) or not isinstance(item.get("occurrences"), int)
+                or not 1 <= item["occurrences"] <= 300):
+            raise ValueError("Investigation session behavior is invalid.")
+        for key in ("durationMs", "longestMs"):
+            duration = item.get(key)
+            if isinstance(duration, bool) or not isinstance(duration, (int, float)) or not math.isfinite(duration) or duration < 0:
+                raise ValueError("Investigation session behavior is invalid.")
+    for finding in behavior_findings:
+        _require_fields(finding, {
+            "kind", "title", "summary", "impactMs", "opportunityMs", "opportunityShare", "states",
+            "fromState", "toState", "occurrences", "evidenceIds", "uncertainty",
+        }, required={
+            "kind", "title", "summary", "impactMs", "opportunityMs", "opportunityShare", "states",
+            "fromState", "toState", "occurrences", "evidenceIds", "uncertainty",
+        })
+        if finding.get("kind") != "opportunity-overlap":
+            raise ValueError("Investigation session behavior is invalid.")
+        for key, maximum in (("title", 100), ("summary", 300)):
+            if not isinstance(finding.get(key), str) or len(finding[key]) > maximum:
+                raise ValueError("Investigation session behavior is invalid.")
+        states = finding.get("states", [])
+        ids = finding.get("evidenceIds", [])
+        uncertainties = finding.get("uncertainty", [])
+        if (not isinstance(states, list) or len(states) > 6 or any(not isinstance(item, str) or len(item) > 80 for item in states)
+                or not isinstance(ids, list) or len(ids) > 4 or any(not isinstance(item, str) or len(item) > 200 for item in ids)
+                or not isinstance(uncertainties, list) or len(uncertainties) > 3 or any(not isinstance(item, str) or len(item) > 180 for item in uncertainties)):
+            raise ValueError("Investigation session behavior is invalid.")
+        for key in ("impactMs", "opportunityMs"):
+            item = finding.get(key)
+            if item is not None and (isinstance(item, bool) or not isinstance(item, (int, float)) or not math.isfinite(item) or item < 0):
+                raise ValueError("Investigation session behavior is invalid.")
+        share = finding.get("opportunityShare")
+        if share is not None and (isinstance(share, bool) or not isinstance(share, (int, float)) or not math.isfinite(share) or not 0 <= share <= 1):
+            raise ValueError("Investigation session behavior is invalid.")
+        for key in ("fromState", "toState"):
+            item = finding.get(key)
+            if item is not None and (not isinstance(item, str) or len(item) > 80):
+                raise ValueError("Investigation session behavior is invalid.")
+        occurrences = finding.get("occurrences")
+        if occurrences is not None and (isinstance(occurrences, bool) or not isinstance(occurrences, int) or not 2 <= occurrences <= 300):
+            raise ValueError("Investigation session behavior is invalid.")
+    opportunity = behavior.get("opportunity")
+    _require_fields(opportunity, {
+        "source", "durationMs", "connectedNonChargingMs", "connectedNonChargingShare", "byState", "findings",
+    }, required={
+        "source", "durationMs", "connectedNonChargingMs", "connectedNonChargingShare", "byState", "findings",
+    })
+    if not isinstance(opportunity.get("source"), str) or len(opportunity["source"]) > 60:
+        raise ValueError("Investigation session behavior is invalid.")
+    for key in ("durationMs", "connectedNonChargingMs"):
+        item = opportunity.get(key)
+        if isinstance(item, bool) or not isinstance(item, (int, float)) or not math.isfinite(item) or item < 0:
+            raise ValueError("Investigation session behavior is invalid.")
+    share = opportunity.get("connectedNonChargingShare")
+    if share is not None and (isinstance(share, bool) or not isinstance(share, (int, float)) or not math.isfinite(share) or not 0 <= share <= 1):
+        raise ValueError("Investigation session behavior is invalid.")
+    by_state = opportunity.get("byState", [])
+    findings = opportunity.get("findings", [])
+    if not isinstance(by_state, list) or len(by_state) > 3 or not isinstance(findings, list) or len(findings) > 1:
+        raise ValueError("Investigation session behavior is invalid.")
+    for item in by_state:
+        _require_fields(item, {"state", "role", "durationMs"})
+        if not isinstance(item.get("state"), str) or len(item["state"]) > 80 or item.get("role") not in allowed_roles:
+            raise ValueError("Investigation session behavior is invalid.")
+        duration = item.get("durationMs")
+        if isinstance(duration, bool) or not isinstance(duration, (int, float)) or not math.isfinite(duration) or duration < 0:
+            raise ValueError("Investigation session behavior is invalid.")
+    for finding in findings:
+        _require_fields(finding, {"summary", "evidenceIds"})
+        if not isinstance(finding.get("summary"), str) or len(finding["summary"]) > 300:
+            raise ValueError("Investigation session behavior is invalid.")
+        ids = finding.get("evidenceIds", [])
+        if not isinstance(ids, list) or len(ids) > 4 or any(not isinstance(item, str) or len(item) > 200 for item in ids):
+            raise ValueError("Investigation session behavior is invalid.")
 
 
 def validate_context(context):
