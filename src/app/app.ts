@@ -36,6 +36,44 @@ declare global {
 export class App implements AfterViewInit {
   readonly isFotaRoute = window.location.pathname.startsWith('/fota');
   readonly currentPath = window.location.pathname;
+  contactInfoOpen = false;
+  profilePopoverTop = 0;
+  profilePopoverLeft = 0;
+  profilePopoverWidth = 0;
+  readonly mockUser = {
+    name: 'Sagiad Madadian',
+    contactInfo: [
+      { label: 'Work location', value: 'Toyota European Headquarters' },
+      { label: 'Work phone', value: 'Not set' },
+      { label: 'Company', value: 'TOYOTA MOTOR EUROPE NV/SA' },
+      { label: 'Job title', value: 'SUPPLIER' },
+      { label: 'Department', value: 'EV & ALLIANCE PROJECTS' },
+      { label: 'Business address', value: 'Not set' },
+      { label: 'Alias', value: 'SMA8038' },
+      { label: 'Cost center', value: 'Not set' }
+    ]
+  };
+
+  closeContactInfoOnOutside(event: MouseEvent): void {
+    if (event.target instanceof Element && !event.target.closest('.profile-menu-anchor')) {
+      this.contactInfoOpen = false;
+    }
+  }
+
+  toggleContactInfo(event: MouseEvent): void {
+    if (this.contactInfoOpen) {
+      this.contactInfoOpen = false;
+      return;
+    }
+
+    const trigger = event.currentTarget as HTMLElement;
+    const bounds = trigger.getBoundingClientRect();
+    const width = Math.min(window.innerWidth - 20, window.innerWidth <= 640 ? 420 : 540);
+    this.profilePopoverTop = bounds.bottom + 8;
+    this.profilePopoverLeft = Math.max(10, Math.min(bounds.right - width, window.innerWidth - width - 10));
+    this.profilePopoverWidth = width;
+    this.contactInfoOpen = true;
+  }
 
   ngAfterViewInit(): void {
     window.dashboardSerialUtils = { findSerialSuggestions, isValidChargerSerial, normalizeSerialNumber };

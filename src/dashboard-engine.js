@@ -9794,6 +9794,20 @@ function formatCountryName(countryCode) {
   }
 }
 
+function setActiveDashboardNavigation(view) {
+  document.querySelectorAll('[data-dashboard-view]').forEach((item) => {
+    const active = item.dataset.dashboardView === view;
+    item.classList.toggle('active', active);
+    if (active) item.setAttribute('aria-current', 'page');
+    else item.removeAttribute('aria-current');
+  });
+}
+
+function setTopbarPageSubtitle(text) {
+  const subtitle = document.getElementById('topbarSubtitle');
+  if (subtitle) subtitle.textContent = text;
+}
+
 function openChargerDashboard(serialNumber) {
   if (!serialNumber) return;
   const utils = window.dashboardSerialUtils;
@@ -9808,8 +9822,11 @@ function openChargerDashboard(serialNumber) {
   const backBtn = document.getElementById('backToFleetBtn');
   const topbarTitle = document.getElementById('topbarTitle');
   const statusCluster = document.getElementById('topbarChargerStatusCluster');
+  const serialSearchBtn = document.getElementById('globalChargerSearchBtn');
+  const fleetReloadBtn = document.getElementById('fleetReloadViewBtn');
   const serialInput = document.getElementById('serialNumber');
   const topbarOpsBtn = document.getElementById('topbarOpsBtn');
+  setActiveDashboardNavigation('fleet');
 
   if (fleetView) fleetView.hidden = true;
   if (chargerView) chargerView.hidden = false;
@@ -9819,6 +9836,8 @@ function openChargerDashboard(serialNumber) {
   document.getElementById('topbarKubernetesBtn')?.classList.remove('active');
   stopKubernetesPolling();
   if (backBtn) backBtn.hidden = false;
+  if (serialSearchBtn) serialSearchBtn.hidden = false;
+  if (fleetReloadBtn) fleetReloadBtn.hidden = true;
   if (statusCluster) statusCluster.hidden = false;
   document.querySelector('.topbar')?.setAttribute('data-view', 'charger');
   updateTopbarChargerStatus();
@@ -9826,6 +9845,7 @@ function openChargerDashboard(serialNumber) {
     topbarTitle.textContent = 'Charger Dashboard';
     topbarTitle.hidden = false;
   }
+  setTopbarPageSubtitle('Monitor charger connectivity, performance, and diagnostics for this unit.');
   updateActiveChargerBadge(serial);
   if (serialInput) {
     serialInput.value = serial;
@@ -9861,7 +9881,10 @@ function openFleetView({ loadFleet = true } = {}) {
   const topbarTitle = document.getElementById('topbarTitle');
   const activeBadge = document.getElementById('activeChargerBadge');
   const statusCluster = document.getElementById('topbarChargerStatusCluster');
+  const serialSearchBtn = document.getElementById('globalChargerSearchBtn');
+  const fleetReloadBtn = document.getElementById('fleetReloadViewBtn');
   const topbarOpsBtn = document.getElementById('topbarOpsBtn');
+  setActiveDashboardNavigation('fleet');
 
   if (fleetView) fleetView.hidden = false;
   if (chargerView) chargerView.hidden = true;
@@ -9871,12 +9894,15 @@ function openFleetView({ loadFleet = true } = {}) {
   document.getElementById('topbarKubernetesBtn')?.classList.remove('active');
   stopKubernetesPolling();
   if (backBtn) backBtn.hidden = true;
+  if (serialSearchBtn) serialSearchBtn.hidden = true;
+  if (fleetReloadBtn) fleetReloadBtn.hidden = false;
   if (statusCluster) statusCluster.hidden = true;
   document.querySelector('.topbar')?.setAttribute('data-view', 'fleet');
   if (topbarTitle) {
     topbarTitle.textContent = 'Charging stations';
     topbarTitle.hidden = false;
   }
+  setTopbarPageSubtitle('Monitor fleet charging infrastructure, connectivity, and operational health across 28 European markets.');
   if (activeBadge) activeBadge.hidden = true;
 
   try {
@@ -9902,7 +9928,10 @@ function openOpsAnalyticsView() {
   const topbarTitle = document.getElementById('topbarTitle');
   const activeBadge = document.getElementById('activeChargerBadge');
   const statusCluster = document.getElementById('topbarChargerStatusCluster');
+  const serialSearchBtn = document.getElementById('globalChargerSearchBtn');
+  const fleetReloadBtn = document.getElementById('fleetReloadViewBtn');
   const topbarOpsBtn = document.getElementById('topbarOpsBtn');
+  setActiveDashboardNavigation('ops');
 
   if (fleetView) fleetView.hidden = true;
   if (chargerView) chargerView.hidden = true;
@@ -9913,11 +9942,14 @@ function openOpsAnalyticsView() {
   stopKubernetesPolling();
   document.querySelector('.topbar')?.setAttribute('data-view', 'ops');
   if (backBtn) backBtn.hidden = false;
+  if (serialSearchBtn) serialSearchBtn.hidden = true;
+  if (fleetReloadBtn) fleetReloadBtn.hidden = true;
   if (statusCluster) statusCluster.hidden = true;
   if (topbarTitle) {
     topbarTitle.textContent = '';
     topbarTitle.hidden = true;
   }
+  setTopbarPageSubtitle('Operational analytics and fleet intelligence for connected charging infrastructure.');
   if (activeBadge) activeBadge.hidden = true;
 
   try {
@@ -9941,6 +9973,7 @@ function stopKubernetesPolling() {
 
 function openKubernetesPodsView() {
   state.currentView = 'kubernetes';
+  setActiveDashboardNavigation('kubernetes');
   document.getElementById('fleetView').hidden = true;
   document.getElementById('chargerView').hidden = true;
   document.getElementById('opsAnalyticsView').hidden = true;
@@ -9948,11 +9981,14 @@ function openKubernetesPodsView() {
   document.getElementById('topbarOpsBtn')?.classList.remove('active');
   document.getElementById('topbarKubernetesBtn')?.classList.add('active');
   document.getElementById('backToFleetBtn').hidden = false;
+  document.getElementById('globalChargerSearchBtn').hidden = true;
+  document.getElementById('fleetReloadViewBtn').hidden = true;
   document.getElementById('topbarChargerStatusCluster').hidden = true;
   document.getElementById('activeChargerBadge').hidden = true;
   const title = document.getElementById('topbarTitle');
   title.textContent = 'Observability';
   title.hidden = false;
+  setTopbarPageSubtitle('Observability for cluster health, services, and deployment signals.');
   document.querySelector('.topbar')?.setAttribute('data-view', 'kubernetes');
   updateKubernetesEnvironmentControls();
   document.getElementById('kubernetesNamespaceSelect').value = state.kubernetes.namespace;
@@ -12518,6 +12554,14 @@ function applyTheme(theme) {
   document.querySelectorAll('.theme-option').forEach((button) => {
     button.setAttribute('aria-pressed', String(button.dataset.theme === (dark ? 'dark' : 'light')));
   });
+  const themeToggle = document.getElementById('themeToggleBtn');
+  if (themeToggle) {
+    const nextTheme = dark ? 'light' : 'dark';
+    themeToggle.dataset.currentTheme = dark ? 'dark' : 'light';
+    themeToggle.setAttribute('aria-pressed', String(dark));
+    themeToggle.setAttribute('aria-label', `Switch to ${nextTheme} mode`);
+    themeToggle.title = `Switch to ${nextTheme} mode`;
+  }
 }
 
 let __sharedTopbarInitialized = false;
@@ -12567,6 +12611,25 @@ function initializeSharedTopbar({ fotaOnly = false } = {}) {
   document.querySelectorAll('.theme-option').forEach((button) => {
     button.addEventListener('click', () => applyTheme(button.dataset.theme));
   });
+  document.getElementById('themeToggleBtn')?.addEventListener('click', (event) => {
+    const button = event.currentTarget;
+    applyTheme(button.dataset.currentTheme === 'dark' ? 'light' : 'dark');
+  });
+
+  const appShell = document.querySelector('.app-shell');
+  const sidebarCollapseBtn = document.getElementById('sidebarCollapseBtn');
+  const setSidebarCollapsed = (collapsed) => {
+    appShell?.classList.toggle('sidebar-collapsed', collapsed);
+    sidebarCollapseBtn?.setAttribute('aria-expanded', String(!collapsed));
+    sidebarCollapseBtn?.setAttribute('aria-label', collapsed ? 'Expand navigation' : 'Collapse navigation');
+    if (sidebarCollapseBtn) sidebarCollapseBtn.title = collapsed ? 'Expand navigation' : 'Collapse navigation';
+  };
+  setSidebarCollapsed(localStorage.getItem('dashboardSidebarCollapsed') === 'true');
+  sidebarCollapseBtn?.addEventListener('click', () => {
+    const collapsed = !appShell?.classList.contains('sidebar-collapsed');
+    setSidebarCollapsed(collapsed);
+    localStorage.setItem('dashboardSidebarCollapsed', String(collapsed));
+  });
 
   const clock = document.getElementById('liveHeaderClock');
   if (clock) {
@@ -12591,23 +12654,52 @@ function initializeSharedTopbar({ fotaOnly = false } = {}) {
 
   const supportNavItem = document.getElementById('topbarSupportNavItem');
   const supportLink = document.getElementById('topbarSupportLink');
+  const supportPopover = document.getElementById('customerSupportPopover');
+  const supportPopoverLayer = document.getElementById('sidebarSupportPopoverLayer');
+  if (supportPopover && supportPopoverLayer && supportPopover.parentElement !== supportPopoverLayer) {
+    supportPopoverLayer.append(supportPopover);
+  }
+  const positionSupportPopover = () => {
+    if (!supportNavItem?.classList.contains('is-open') || !supportLink || !supportPopover) return;
+    const trigger = supportLink.getBoundingClientRect();
+    const padding = 12;
+    const popoverWidth = Math.min(330, window.innerWidth - padding * 2);
+    const popoverHeight = Math.min(supportPopover.scrollHeight || 260, window.innerHeight - padding * 2);
+    const rightSpace = window.innerWidth - trigger.right - padding * 2;
+    const leftSpace = trigger.left - padding * 2;
+    const left = rightSpace >= popoverWidth
+      ? trigger.right + 8
+      : leftSpace >= popoverWidth
+        ? trigger.left - popoverWidth - 8
+        : Math.max(padding, Math.min(trigger.left, window.innerWidth - popoverWidth - padding));
+    const top = Math.max(padding, Math.min(trigger.top, window.innerHeight - popoverHeight - padding));
+    supportPopover.style.setProperty('--sidebar-support-left', `${left}px`);
+    supportPopover.style.setProperty('--sidebar-support-top', `${top}px`);
+    supportPopover.style.setProperty('--sidebar-support-width', `${popoverWidth}px`);
+  };
+  window.addEventListener('resize', positionSupportPopover);
+  document.addEventListener('scroll', positionSupportPopover, true);
   if (supportLink && supportNavItem) {
     supportLink.addEventListener('click', (event) => {
       event.preventDefault();
       const isExpanded = supportLink.getAttribute('aria-expanded') === 'true';
       supportLink.setAttribute('aria-expanded', String(!isExpanded));
       supportNavItem.classList.toggle('is-open', !isExpanded);
+      supportPopover?.classList.toggle('is-open', !isExpanded);
+      if (!isExpanded) positionSupportPopover();
     });
     document.addEventListener('click', (event) => {
-      if (!supportNavItem.contains(event.target)) {
+      if (!supportNavItem.contains(event.target) && !supportPopover?.contains(event.target)) {
         supportLink.setAttribute('aria-expanded', 'false');
         supportNavItem.classList.remove('is-open');
+        supportPopover?.classList.remove('is-open');
       }
     });
     document.addEventListener('keydown', (event) => {
       if (event.key === 'Escape' && supportNavItem.classList.contains('is-open')) {
         supportLink.setAttribute('aria-expanded', 'false');
         supportNavItem.classList.remove('is-open');
+        supportPopover?.classList.remove('is-open');
         supportLink.focus();
       }
     });
@@ -12633,6 +12725,43 @@ function initializeSharedTopbar({ fotaOnly = false } = {}) {
     } else {
       openKubernetesPodsView();
     }
+  });
+
+  document.getElementById('sidebarFleetBtn')?.addEventListener('click', (event) => {
+    event.preventDefault();
+    if (__fotaHeaderOnly) window.location.assign('/');
+    else if (state.currentView !== 'fleet') openFleetView();
+  });
+
+  document.getElementById('globalChargerSearchBtn')?.addEventListener('click', () => {
+    if (state.currentView !== 'charger') return;
+    const input = document.getElementById('serialNumber');
+    input?.focus({ preventScroll: true });
+    input?.select();
+    input?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+  });
+
+  document.getElementById('fleetReloadViewBtn')?.addEventListener('click', (event) => {
+    const button = event.currentTarget;
+    button.classList.add('rotating');
+    Promise.all([fetchFleetWallboxes(state.fleet.page), fetchOutages()]).finally(() => {
+      window.setTimeout(() => button.classList.remove('rotating'), 600);
+    });
+  });
+
+  document.addEventListener('keydown', (event) => {
+    if (!(event.ctrlKey || event.metaKey) || event.key.toLowerCase() !== 'k') return;
+    if (state.currentView !== 'fleet' && state.currentView !== 'charger') return;
+
+    const inputId = state.currentView === 'fleet' ? 'fleetDirectSerialInput' : 'serialNumber';
+    const input = document.getElementById(inputId);
+    if (!input) return;
+
+    event.preventDefault();
+    input.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    input.focus({ preventScroll: true });
+    input.select();
+    input.dispatchEvent(new Event('input', { bubbles: true }));
   });
 
   document.getElementById('kubernetesNamespaceSelect')?.addEventListener('change', (event) => {
@@ -13044,15 +13173,6 @@ async function startDashboardApp() {
     }
   });
 
-  const openOpsAnalyticsHeroBtn = document.getElementById('openOpsAnalyticsHeroBtn');
-  if (openOpsAnalyticsHeroBtn) {
-    openOpsAnalyticsHeroBtn.addEventListener('click', (e) => {
-      e.preventDefault();
-      openOpsAnalyticsView();
-    });
-  }
-
-
   const opsBottomBackBtn = document.getElementById('opsBottomBackBtn');
   if (opsBottomBackBtn) {
     opsBottomBackBtn.addEventListener('click', openFleetView);
@@ -13109,33 +13229,30 @@ async function startDashboardApp() {
     }
   });
 
-  // Direct Serial Jump in Fleet Hero
   const directSerialInput = document.getElementById('fleetDirectSerialInput');
   const directJumpBtn = document.getElementById('fleetDirectJumpBtn');
   const handleDirectJump = () => {
     const utils = window.dashboardSerialUtils;
-    const val = utils.normalizeSerialNumber(directSerialInput?.value || '');
-    if (directSerialInput) directSerialInput.value = val;
-    if (!utils.isValidChargerSerial(val)) {
+    const serial = utils.normalizeSerialNumber(directSerialInput?.value || '');
+    if (directSerialInput) directSerialInput.value = serial;
+    if (!utils.isValidChargerSerial(serial)) {
       setSerialLookupError(directSerialInput, 'Enter a complete charger serial number.');
       directSerialInput?.focus();
       return;
     }
     setSerialLookupError(directSerialInput, '');
-    rememberSerial(val);
-    openChargerDashboard(val);
+    rememberSerial(serial);
+    openChargerDashboard(serial);
   };
-  if (directJumpBtn) directJumpBtn.addEventListener('click', handleDirectJump);
-  if (directSerialInput) {
-    directSerialInput.addEventListener('change', () => {
-      const val = directSerialInput.value.trim().toUpperCase();
-      if (val && val.length >= 5) rememberSerial(val);
-    });
-    directSerialInput.addEventListener('blur', () => {
-      const val = directSerialInput.value.trim().toUpperCase();
-      if (val && val.length >= 5) rememberSerial(val);
-    });
-  }
+  directJumpBtn?.addEventListener('click', handleDirectJump);
+  directSerialInput?.addEventListener('change', () => {
+    const serial = directSerialInput.value.trim().toUpperCase();
+    if (serial.length >= 5) rememberSerial(serial);
+  });
+  directSerialInput?.addEventListener('blur', () => {
+    const serial = directSerialInput.value.trim().toUpperCase();
+    if (serial.length >= 5) rememberSerial(serial);
+  });
 
   // Fleet Filter Toolbar
   const fleetSearchInput = document.getElementById('fleetSearchSerialInput');
@@ -13250,7 +13367,7 @@ async function startDashboardApp() {
   setupOutagesControls();
   initFloatingTimeToolbar();
 
-  // Attach Smart Serial Autocomplete & Fuzzy Typo Suggestion to all 4 serial input fields
+  // Attach Smart Serial Autocomplete & Fuzzy Typo Suggestion to the serial input fields
   attachSmartSerialSearch(document.getElementById('serialNumber'), (serial) => {
     scheduleSerialSearch(0);
   });
@@ -13274,6 +13391,14 @@ async function startDashboardApp() {
     openKubernetesPodsView();
   } else {
     openFleetView();
+  }
+
+  if (urlParams.get('focus') === 'fleet-search') {
+    window.setTimeout(() => {
+      const input = document.getElementById('fleetSearchSerialInput');
+      input?.focus({ preventScroll: true });
+      input?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    }, 0);
   }
 
   // Load fleet metadata in background without blocking wallbox rendering

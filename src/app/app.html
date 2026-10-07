@@ -1,35 +1,156 @@
-﻿    <div class="app-shell" [class.fota-mode]="isFotaRoute">
+﻿    <div class="app-shell" [class.fota-mode]="isFotaRoute" (click)="closeContactInfoOnOutside($event)" (keydown.escape)="contactInfoOpen = false">
+      <aside class="app-sidebar" aria-label="Application navigation">
+        <div class="sidebar-header">
+          <a href="/" class="sidebar-brand" id="topbarToyotaBrand" title="Toyota Motor Europe - Fleet Overview">
+            <svg class="sidebar-brand-mark" viewBox="94 132 185 113" fill="#fff" aria-hidden="true">
+              <path d="M224,137.8c-10.4-3.3-23.3-5.3-37.4-5.3c-14,0-27,2-37.4,5.3c-27.6,8.9-46.6,27.3-46.6,48.7c0,30,37.6,54.3,84,54.3c46.4,0,84-24.3,84-54.3C270.7,165.2,251.7,146.7,224,137.8M186.7,217.5c-6.9,0-12.6-13.6-12.9-30.7c4.2,0.4,8.5,0.6,12.9,0.6c4.4,0,8.7-0.2,12.9-0.6C199.2,203.9,193.6,217.5,186.7,217.5M174.6,173.4c1.9-12,6.6-20.5,12-20.5c5.5,0,10.1,8.5,12,20.5c-3.8,0.3-7.9,0.5-12,0.5C182.5,173.9,178.5,173.7,174.6,173.4M206.1,172.5c-2.8-18.8-10.4-32.4-19.4-32.4c-9,0-16.6,13.5-19.4,32.4c-17.1-2.7-29-8.7-29-15.8c0-9.5,21.7-17.2,48.4-17.2c26.7,0,48.4,7.7,48.4,17.2C235,163.7,223.1,169.8,206.1,172.5M114.9,184.5c0-9.2,3.5-17.8,9.7-25.2c-0.1,0.5-0.1,1-0.1,1.6c0,11.6,17.4,21.4,41.6,25c0,0.9,0,1.8,0,2.6c0,21.5,6,39.7,14.2,46C143.7,232.3,114.9,210.7,114.9,184.5M193,234.5c8.2-6.3,14.2-24.5,14.2-46c0-0.9,0-1.8,0-2.6c24.2-3.6,41.6-13.5,41.6-25c0-0.5,0-1-0.1-1.6c6.2,7.4,9.7,16,9.7,25.2C258.4,210.7,229.6,232.3,193,234.5"/>
+            </svg>
+            <span class="sidebar-brand-copy"><strong>TOYOTA</strong><small>MOTOR EUROPE</small></span>
+          </a>
+          <button type="button" class="sidebar-collapse-toggle" id="sidebarCollapseBtn" aria-controls="primarySidebarNavigation" aria-expanded="true" aria-label="Collapse navigation" title="Collapse navigation">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m14.5 5-7 7 7 7"/></svg>
+          </button>
+        </div>
+
+        <nav class="sidebar-navigation" id="primarySidebarNavigation" aria-label="Primary navigation">
+          <span class="sidebar-group-label">WORKSPACE</span>
+          <button type="button" class="sidebar-link" id="sidebarFleetBtn" data-dashboard-view="fleet" [class.active]="!isFotaRoute" [attr.aria-current]="!isFotaRoute ? 'page' : null" title="Charging Stations">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 21V8l7-4 7 4v13M3 21h18M9 21v-6h6v6M8 10h.01M16 10h.01"/></svg>
+            <span>Charging Stations</span>
+          </button>
+
+          <span class="sidebar-group-label">OPERATIONS</span>
+          <button type="button" class="sidebar-link" id="topbarOpsBtn" data-dashboard-view="ops" title="System Operations &amp; Analytics">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M18 20V10M12 20V4M6 20v-6"/></svg>
+            <span>OPS Analytics</span>
+          </button>
+          <button type="button" class="sidebar-link" id="topbarKubernetesBtn" data-dashboard-view="kubernetes" title="Kubernetes pod health">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m12 2.8 8 4.6v9.2l-8 4.6-8-4.6V7.4zM12 7v10m-4.3-7.6 8.6 5.2m0-5.2-8.6 5.2"/></svg>
+            <span>Kubernetes</span>
+          </button>
+
+          <span class="sidebar-group-label">PLATFORM</span>
+          <a class="sidebar-link" href="/fota/packages" [class.active]="isFotaRoute" [attr.aria-current]="isFotaRoute ? 'page' : null" title="Firmware on the air management">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3v12m0 0 4-4m-4 4-4-4M5 17v3h14v-3"/></svg>
+            <span>FOTA</span>
+          </a>
+          <div class="sidebar-support-item topbar-nav-item has-popover" id="topbarSupportNavItem">
+            <button type="button" class="sidebar-link sidebar-support-link" id="topbarSupportLink" aria-label="Customer Support &amp; Fleet Assistance" aria-haspopup="dialog" aria-expanded="false" title="Customer Support &amp; Fleet Assistance">
+              <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M9.4 9a2.7 2.7 0 1 1 4.7 1.8c-1.3 1.2-2.1 1.5-2.1 3.2M12 17.5h.01"/></svg>
+              <span>Support</span>
+              <svg class="nav-chevron" viewBox="0 0 24 24" aria-hidden="true"><polyline points="6 9 12 15 18 9"/></svg>
+            </button>
+              <div class="topbar-popover sidebar-support-popover" role="tooltip" id="customerSupportPopover" aria-label="Customer Support Details">
+                <div class="topbar-popover-header">
+                  <div class="popover-icon-box" aria-hidden="true"><svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 11.5a8.38 8.38 0 0 1-.9 3.8 8.5 8.5 0 0 1-7.6 4.7 8.38 8.38 0 0 1-3.8-.9L3 21l1.9-5.7a8.38 8.38 0 0 1-.9-3.8 8.5 8.5 0 0 1 4.7-7.6 8.38 8.38 0 0 1 3.8-.9h.5a8.48 8.48 0 0 1 8 8v.5z"/></svg></div>
+                  <div class="popover-header-text"><strong>TME EVBE Customer Support</strong><span class="popover-sub">Fleet Escalation &amp; Diagnostics</span></div>
+                  <span class="support-status-chip nominal">SLA Active</span>
+                </div>
+                <div class="topbar-popover-body">
+                  <p>Support desk and telemetry assistance for European charging operations, wallbox commissioning, and Tier-2 diagnostic overrides.</p>
+                  <div class="popover-contact-grid">
+                    <div class="contact-item"><span class="contact-label">Hotline:</span><span class="contact-val">+32 2 745 2111 (TME HQ)</span></div>
+                    <div class="contact-item"><span class="contact-label">Portal:</span><span class="contact-val">ev-support.toyota-europe.com</span></div>
+                    <div class="contact-item"><span class="contact-label">Escalation:</span><span class="contact-val">24/7 Operations Duty</span></div>
+                    <div class="contact-item"><span class="contact-label">Scope:</span><span class="contact-val">28 EU Operating Markets</span></div>
+                  </div>
+                </div>
+              </div>
+          </div>
+        </nav>
+
+        <div class="sidebar-footer">
+          <div class="live-telemetry-badge integrated-telemetry-pill sidebar-live-status" id="liveTelemetryBadge" title="Live telemetry, sync provenance and session authentication">
+            <div class="sidebar-live-status-heading">
+              <span class="live-beacon" aria-hidden="true"></span>
+              <span class="live-text" id="liveHeaderEnvBadge">PROD LIVE</span>
+              <span class="live-clock" id="liveHeaderClock">--:--:--</span>
+            </div>
+            <div class="sidebar-settings-row">
+              <div class="env-switcher sidebar-env-switcher" id="envSwitcher" role="group" aria-label="Target Environment">
+                <button type="button" class="env-pill active" data-env="prod" title="Production (33k+ chargers)">
+                  <span class="env-dot env-dot-prod"></span>
+                  <span class="env-name">PROD</span>
+                </button>
+                <button type="button" class="env-pill" data-env="acc" title="Acceptance (47k+ chargers)">
+                  <span class="env-dot env-dot-acc"></span>
+                  <span class="env-name">ACC</span>
+                </button>
+                <button type="button" class="env-pill" data-env="prev" title="Pre-Validation (119k+ chargers)">
+                  <span class="env-dot env-dot-prev"></span>
+                  <span class="env-name">PREV</span>
+                </button>
+              </div>
+            </div>
+            <div class="token-status-pill inline-token-segment" id="globalTokenPill" title="TME session authentication status">
+              <span class="token-state-dot" id="globalTokenDot"></span>
+              <span id="globalTokenText">Token: Ready</span>
+              <button type="button" id="globalTokenRefresh" class="token-refresh-btn" title="Refresh session token" aria-label="Refresh session token">
+                <svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2"><path d="M21.5 2v6h-6M21.34 15.57a10 10 0 1 1-.57-8.38l5.67-5.67"/></svg>
+              </button>
+            </div>
+            <span class="telemetry-pill-divider" aria-hidden="true"></span>
+            <span class="live-sync-indicator" id="liveDataSyncStatus">Synced Just Now</span>
+          </div>
+          <div class="sidebar-footer-label"><span class="sidebar-footer-dot" aria-hidden="true"></span><span>EU Fleet Operations</span></div>
+          <p class="designer-note sidebar-designer-note">
+            <svg class="inline-toyota-emblem" viewBox="74.7 74.7 224 224" width="13" height="13" fill="currentColor" aria-hidden="true">
+              <path d="M224,137.8c-10.4-3.3-23.3-5.3-37.4-5.3c-14,0-27,2-37.4,5.3c-27.6,8.9-46.6,27.3-46.6,48.7 c0,30,37.6,54.3,84,54.3c46.4,0,84-24.3,84-54.3C270.7,165.2,251.7,146.7,224,137.8 M186.7,217.5c-6.9,0-12.6-13.6-12.9-30.7c4.2,0.4,8.5,0.6,12.9,0.6c4.4,0,8.7-0.2,12.9-0.6C199.2,203.9,193.6,217.5,186.7,217.5 M174.6,173.4c1.9-12,6.6-20.5,12-20.5c5.5,0,10.1,8.5,12,20.5c-3.8,0.3-7.9,0.5-12,0.5C182.5,173.9,178.5,173.7,174.6,173.4 M206.1,172.5c-2.8-18.8-10.4-32.4-19.4-32.4c-9,0-16.6,13.5-19.4,32.4c-17.1-2.7-29-8.7-29-15.8c0-9.5,21.7-17.2,48.4-17.2c26.7,0,48.4,7.7,48.4,17.2 C235,163.7,223.1,169.8,206.1,172.5 M114.9,184.5c0-9.2,3.5-17.8,9.7-25.2c-0.1,0.5-0.1,1-0.1,1.6c0,11.6,17.4,21.4,41.6,25 c0,0.9,0,1.8,0,2.6c0,21.5,6,39.7,14.2,46C143.7,232.3,114.9,210.7,114.9,184.5 M193,234.5c8.2-6.3,14.2-24.5,14.2-46c0-0.9,0-1.8,0-2.6c24.2-3.6,41.6-13.5,41.6-25c0-0.5,0-1-0.1-1.6c6.2,7.4,9.7,16,9.7,25.2C258.4,210.7,229.6,232.3,193,234.5"/>
+            </svg>
+            <span>Toyota Motor Europe · Designed by Sagiad Madadian | 2026</span>
+          </p>
+        </div>
+      </aside>
+
+      <div class="app-main">
             <header class="topbar">
         <!-- GROUP 1: TOP ROW - Toyota Branding, Scope, Titles & Circular Back Button -->
         <div class="topbar-branding">
-          <a href="/" class="topbar-toyota-brand" id="topbarToyotaBrand" title="Toyota Motor Europe - Fleet Overview">
-            <div class="toyota-brand-logo" aria-hidden="true">
-              <svg viewBox="74.7 74.7 224 224" class="toyota-svg-emblem">
-                <path d="M224,137.8c-10.4-3.3-23.3-5.3-37.4-5.3c-14,0-27,2-37.4,5.3c-27.6,8.9-46.6,27.3-46.6,48.7 c0,30,37.6,54.3,84,54.3c46.4,0,84-24.3,84-54.3C270.7,165.2,251.7,146.7,224,137.8 M186.7,217.5c-6.9,0-12.6-13.6-12.9-30.7c4.2,0.4,8.5,0.6,12.9,0.6c4.4,0,8.7-0.2,12.9-0.6C199.2,203.9,193.6,217.5,186.7,217.5 M174.6,173.4c1.9-12,6.6-20.5,12-20.5c5.5,0,10.1,8.5,12,20.5c-3.8,0.3-7.9,0.5-12,0.5C182.5,173.9,178.5,173.7,174.6,173.4 M206.1,172.5c-2.8-18.8-10.4-32.4-19.4-32.4c-9,0-16.6,13.5-19.4,32.4c-17.1-2.7-29-8.7-29-15.8c0-9.5,21.7-17.2,48.4-17.2c26.7,0,48.4,7.7,48.4,17.2 C235,163.7,223.1,169.8,206.1,172.5 M114.9,184.5c0-9.2,3.5-17.8,9.7-25.2c-0.1,0.5-0.1,1-0.1,1.6c0,11.6,17.4,21.4,41.6,25 c0,0.9,0,1.8,0,2.6c0,21.5,6,39.7,14.2,46C143.7,232.3,114.9,210.7,114.9,184.5 M193,234.5c8.2-6.3,14.2-24.5,14.2-46c0-0.9,0-1.8,0-2.6c24.2-3.6,41.6-13.5,41.6-25c0-0.5,0-1-0.1-1.6c6.2,7.4,9.7,16,9.7,25.2C258.4,210.7,229.6,232.3,193,234.5"/>
-              </svg>
-            </div>
-            <div class="toyota-brand-text">
-              <span class="toyota-wordmark">TOYOTA</span>
-              <span class="toyota-submark">Motor Europe</span>
-            </div>
-          </a>
-          <div class="topbar-brand-divider" aria-hidden="true"></div>
           <div class="topbar-titles-wrap">
             <p class="eyebrow" id="topbarEyebrow">EV Fleet Operations</p>
             <div class="topbar-title-row">
               <h1 id="topbarTitle" [textContent]="isFotaRoute ? 'Firmware management' : 'Charging stations'"></h1>
             </div>
+            <p class="topbar-subtitle" id="topbarSubtitle" [textContent]="isFotaRoute ? 'Firmware releases, campaigns, and deployment readiness.' : 'Monitor fleet charging infrastructure, connectivity, and operational health across 28 European markets.'"></p>
           </div>
           <div class="topbar-brand-right">
-            <div id="topbarChargerStatusCluster" class="topbar-charger-status-cluster" hidden>
-              <span id="topbarConnectivityPill" class="topbar-status-minimal-pill is-online" title="Charger Connectivity Status">
-                <span class="status-dot"></span>
-                <span class="status-text" id="topbarConnectivityText">Online</span>
-              </span>
-              <span id="topbarConnectorPill" class="topbar-status-minimal-pill tone-available" title="Connector 1 Status">
-                <span class="status-dot" id="topbarConnectorDot"></span>
-                <span class="status-text" id="topbarConnectorText">Connector 1: Available</span>
-              </span>
+            <button type="button" class="global-search-trigger" id="globalChargerSearchBtn" title="Search charger serial number" aria-label="Search charger serial number" hidden>
+              <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="7"/><path d="m16 16 4 4"/></svg>
+              <span>Search charger serial number...</span>
+              <kbd aria-hidden="true">Ctrl K</kbd>
+            </button>
+            <button type="button" class="fleet-reload-btn" id="fleetReloadViewBtn" title="Reload fleet dashboard" aria-label="Reload fleet dashboard" hidden>
+              <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M20 7v5h-5"/><path d="M20 12a8 8 0 1 1-2.35-5.65L20 9"/></svg>
+            </button>
+            <button type="button" class="theme-mode-toggle" id="themeToggleBtn" data-current-theme="light" aria-label="Switch to dark mode" title="Switch to dark mode" aria-pressed="false">
+              <svg class="theme-mode-icon theme-mode-icon-sun" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="4"/><path d="M12 2v2m0 16v2M4.93 4.93l1.42 1.42m11.3 11.3 1.42 1.42M2 12h2m16 0h2M4.93 19.07l1.42-1.42m11.3-11.3 1.42-1.42"/></svg>
+              <svg class="theme-mode-icon theme-mode-icon-moon" viewBox="0 0 24 24" aria-hidden="true"><path d="M20.2 15.1A8.5 8.5 0 0 1 8.9 3.8 8.7 8.7 0 1 0 20.2 15.1Z"/></svg>
+            </button>
+            <div class="profile-menu-anchor" (click)="$event.stopPropagation()">
+              <button type="button" class="profile-trigger" aria-label="View mocked user contact information for Sagiad Madadian" title="Sagiad Madadian · Mock profile" aria-haspopup="dialog" aria-controls="contactInfoDialog" [attr.aria-expanded]="contactInfoOpen" (click)="toggleContactInfo($event)">
+                <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="8" r="3.5"/><path d="M5 21v-2c0-3 3-5 7-5s7 2 7 5v2z"/></svg>
+              </button>
+              <section id="contactInfoDialog" class="contact-info-popover" role="dialog" aria-labelledby="contactInfoTitle" [hidden]="!contactInfoOpen" [style.top.px]="profilePopoverTop" [style.left.px]="profilePopoverLeft" [style.width.px]="profilePopoverWidth">
+                <div class="contact-info-heading">
+                  <svg class="contact-info-person-icon" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="8" r="3.5"/><path d="M5 21v-2c0-3 3-5 7-5s7 2 7 5v2z"/></svg>
+                  <div class="contact-info-heading-copy">
+                    <h2 id="contactInfoTitle">Contact information</h2>
+                    <p>{{ mockUser.name }} · Mocked user</p>
+                  </div>
+                  <button type="button" class="contact-info-close" aria-label="Close contact information" (click)="contactInfoOpen = false">
+                    <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m6 6 12 12M18 6 6 18"/></svg>
+                  </button>
+                </div>
+                <p class="contact-info-notice">To update your name and job title, please reach out to your IT or HR department, or contact your admin directly.</p>
+                <dl class="contact-info-list">
+                  @for (item of mockUser.contactInfo; track item.label) {
+                    <div class="contact-info-row">
+                      <dt>{{ item.label }}</dt>
+                      <dd>{{ item.value }}</dd>
+                    </div>
+                  }
+                </dl>
+              </section>
             </div>
             <span id="activeChargerBadge" class="active-charger-badge" hidden></span>
             <button type="button" id="backToFleetBtn" class="back-to-fleet-btn" hidden title="Back to Fleet Overview" aria-label="Back to Fleet Overview">
@@ -38,108 +159,6 @@
           </div>
         </div>
 
-        <!-- GROUP 2: BOTTOM ROW - Actions, Telemetry, Tools & Theme -->
-        <div class="topbar-actions">
-          <div class="topbar-telemetry-cluster">
-            <div class="env-switcher" id="envSwitcher" role="group" aria-label="Target Environment">
-              <button type="button" class="env-pill active" data-env="prod" title="Production (33k+ chargers)">
-                <span class="env-dot env-dot-prod"></span>
-                <span class="env-name">PROD</span>
-              </button>
-              <button type="button" class="env-pill" data-env="acc" title="Acceptance (47k+ chargers)">
-                <span class="env-dot env-dot-acc"></span>
-                <span class="env-name">ACC</span>
-              </button>
-              <button type="button" class="env-pill" data-env="prev" title="Pre-Validation (119k+ chargers)">
-                <span class="env-dot env-dot-prev"></span>
-                <span class="env-name">PREV</span>
-              </button>
-            </div>
-            <div class="live-telemetry-badge integrated-telemetry-pill" id="liveTelemetryBadge" title="Live telemetry, sync provenance and session authentication">
-              <span class="live-beacon" aria-hidden="true"></span>
-              <span class="live-text" id="liveHeaderEnvBadge">PROD LIVE</span>
-              <span class="live-clock" id="liveHeaderClock">--:--:--</span>
-              <span class="telemetry-pill-divider" aria-hidden="true"></span>
-              <div class="token-status-pill inline-token-segment" id="globalTokenPill" title="TME session authentication status">
-                <span class="token-state-dot" id="globalTokenDot"></span>
-                <span id="globalTokenText">Token: Ready</span>
-                <button type="button" id="globalTokenRefresh" class="token-refresh-btn" title="Refresh session token" aria-label="Refresh session token">
-                  <svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2"><path d="M21.5 2v6h-6M21.34 15.57a10 10 0 1 1-.57-8.38l5.67-5.67"/></svg>
-                </button>
-              </div>
-              <span class="telemetry-pill-divider" aria-hidden="true"></span>
-              <span class="live-sync-indicator" id="liveDataSyncStatus">Synced Just Now</span>
-            </div>
-          </div>
-          <div class="topbar-tools-cluster">
-            <button type="button" class="topbar-ops-pill" id="topbarOpsBtn" title="System Operations & Analytics View">
-              <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2.2"><path d="M18 20V10M12 20V4M6 20v-6"/></svg>
-              <span>OPS Analytics</span>
-            </button>
-            <button type="button" class="topbar-ops-pill" id="topbarKubernetesBtn" title="Kubernetes pod health">
-              <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M12 2.8 20 7.4v9.2l-8 4.6-8-4.6V7.4z"/><path d="M12 7v10M7.7 9.4l8.6 5.2m0-5.2-8.6 5.2"/></svg>
-              <span>Kubernetes</span>
-            </button>
-            <a class="topbar-ops-pill" href="/fota/packages" [class.active]="isFotaRoute" [attr.aria-current]="isFotaRoute ? 'page' : null" title="Firmware on the air management">
-              <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 3v12m0 0 4-4m-4 4-4-4"/><path d="M5 17v3h14v-3"/></svg>
-              <span>FOTA</span>
-            </a>
-            <div class="topbar-nav-item has-popover" id="topbarSupportNavItem">
-              <button type="button" class="topbar-nav-link" id="topbarSupportLink" aria-label="Customer Support & Fleet Assistance" aria-haspopup="dialog" aria-expanded="false" title="Customer Support & Fleet Assistance">
-                <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2">
-                  <circle cx="12" cy="12" r="10"/>
-                  <path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3"/>
-                  <line x1="12" y1="17" x2="12.01" y2="17"/>
-                </svg>
-                <span>Support</span>
-                <svg class="nav-chevron" viewBox="0 0 24 24" width="10" height="10" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="6 9 12 15 18 9"/></svg>
-              </button>
-              <div class="topbar-popover" role="tooltip" id="customerSupportPopover" aria-label="Customer Support Details">
-                <div class="topbar-popover-header">
-                  <div class="popover-icon-box" aria-hidden="true">
-                    <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 11.5a8.38 8.38 0 0 1-.9 3.8 8.5 8.5 0 0 1-7.6 4.7 8.38 8.38 0 0 1-3.8-.9L3 21l1.9-5.7a8.38 8.38 0 0 1-.9-3.8 8.5 8.5 0 0 1 4.7-7.6 8.38 8.38 0 0 1 3.8-.9h.5a8.48 8.48 0 0 1 8 8v.5z"/></svg>
-                  </div>
-                  <div class="popover-header-text">
-                    <strong>TME EVBE Customer Support</strong>
-                    <span class="popover-sub">Fleet Escalation & Diagnostics</span>
-                  </div>
-                  <span class="support-status-chip nominal">SLA Active</span>
-                </div>
-                <div class="topbar-popover-body">
-                  <p>Support desk and telemetry assistance for European charging operations, wallbox commissioning, and Tier-2 diagnostic overrides.</p>
-                  <div class="popover-contact-grid">
-                    <div class="contact-item">
-                      <span class="contact-label">Hotline:</span>
-                      <span class="contact-val">+32 2 745 2111 (TME HQ)</span>
-                    </div>
-                    <div class="contact-item">
-                      <span class="contact-label">Portal:</span>
-                      <span class="contact-val">ev-support.toyota-europe.com</span>
-                    </div>
-                    <div class="contact-item">
-                      <span class="contact-label">Escalation:</span>
-                      <span class="contact-val">24/7 Operations Duty</span>
-                    </div>
-                    <div class="contact-item">
-                      <span class="contact-label">Scope:</span>
-                      <span class="contact-val">28 EU Operating Markets</span>
-                    </div>
-                  </div>
-                </div>
-              </div>
-            </div>
-            <div id="themeSwitch" class="theme-switch" role="group" aria-label="Color theme">
-              <button type="button" class="theme-option" data-theme="light" aria-label="Light theme" aria-pressed="true">
-                <svg class="theme-icon" viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="5"/><line x1="12" y1="1" x2="12" y2="3"/><line x1="12" y1="21" x2="12" y2="23"/><line x1="4.22" y1="4.22" x2="5.64" y2="5.64"/><line x1="18.36" y1="18.36" x2="19.78" y2="19.78"/><line x1="1" y1="12" x2="3" y2="12"/><line x1="21" y1="12" x2="23" y2="12"/><line x1="4.22" y1="19.78" x2="5.64" y2="18.36"/><line x1="18.36" y1="5.64" x2="19.78" y2="4.22"/></svg>
-                <span>Light</span>
-              </button>
-              <button type="button" class="theme-option" data-theme="dark" aria-label="Dark theme" aria-pressed="false">
-                <svg class="theme-icon" viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/></svg>
-                <span>Dark</span>
-              </button>
-            </div>
-          </div>
-        </div>
         <nav class="topbar-nav fota-view-nav" aria-label="Firmware views" [hidden]="!isFotaRoute">
           <a class="topbar-nav-link" href="/fota/packages" [class.active]="currentPath === '/fota/packages' || currentPath === '/fota'" [attr.aria-current]="currentPath === '/fota/packages' || currentPath === '/fota' ? 'page' : null">Packages</a>
           <a class="topbar-nav-link" href="/fota/campaigns" [class.active]="currentPath.startsWith('/fota/campaigns')" [attr.aria-current]="currentPath.startsWith('/fota/campaigns') ? 'page' : null">Campaigns</a>
@@ -168,27 +187,12 @@
               <p>Fleet-wide connectivity health, hardware deployment, and diagnostic telemetry across 28 European operating markets.</p>
             </div>
             <div class="fleet-hero-side">
-              <button type="button" class="fleet-hero-card fleet-ops-banner-card" id="openOpsAnalyticsHeroBtn" title="Open System Operations &amp; Fleet Analytics">
-                <div class="hero-card-header">
-                  <div class="ops-card-badge">
-                    <span class="ops-pulse-beacon"></span>
-                    <span>OPS INTELLIGENCE</span>
-                  </div>
-                  <span class="ops-arrow-pill">Open View →</span>
-                </div>
-                <div class="hero-card-headline">
-                  <strong>System Analytics &amp; Insights</strong>
-                </div>
-                <p class="hero-card-sub">Fleet status breakdown, 28 EU countries &amp; firmware compliance</p>
-              </button>
-
               <div class="fleet-hero-card fleet-direct-jump-card">
                 <div class="hero-card-header">
                   <div class="ops-card-badge">
                     <svg viewBox="0 0 24 24" width="11" height="11" fill="none" stroke="currentColor" stroke-width="2.5"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
                     <span>DIRECT LOOKUP</span>
                   </div>
-                  <span class="hero-card-tag">Quick Jump</span>
                 </div>
                 <div class="hero-card-headline">
                   <strong>Charger Investigation</strong>
@@ -197,7 +201,7 @@
                   <span class="fleet-jump-icon">
                     <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2"><path d="M6.3 20.3a2.4 2.4 0 0 0 3.4 0L12 18l-6-6-2.3 2.3a2.4 2.4 0 0 0 0 3.4z"/><path d="m2 22 3-3"/></svg>
                   </span>
-                  <input type="text" id="fleetDirectSerialInput" placeholder="Enter Serial (e.g. TACW2244723S0930)" autocomplete="off" autocapitalize="characters" spellcheck="false" />
+                  <input type="text" id="fleetDirectSerialInput" placeholder="Enter Serial (e.g. TACW2244723S0930)" autocomplete="off" autocapitalize="characters" spellcheck="false" aria-label="Charger serial number" />
                   <button type="button" id="fleetDirectJumpBtn" class="primary">
                     <span>Open</span>
                     <svg viewBox="0 0 24 24" width="11" height="11" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="9 18 15 12 9 6"/></svg>
@@ -208,6 +212,12 @@
           </div>
 
           <!-- 4 Fleet KPI & Analytics Cards -->
+          <div class="fleet-kpi-heading">
+            <div>
+              <h3>Fleet Health at a Glance</h3>
+              <p>Key metrics and live status across your charging infrastructure.</p>
+            </div>
+          </div>
           <div class="fleet-kpi-grid">
             <div class="fleet-kpi-card" id="kpiFleetSize">
               <div class="kpi-icon-box kpi-blue">
@@ -441,16 +451,35 @@
             <p id="copyFeedback" class="serial-feedback" role="status" aria-live="polite" hidden></p>
           </div>
 
-          <div class="token-status">
-            <div class="token-status-controls">
-              <div id="tokenLed" class="token-state" role="status" aria-label="Token status">
-                <span class="token-state-dot" aria-hidden="true"></span>
-                <span id="tokenStatusText">Missing</span>
+          <div class="charger-live-metrics">
+            <div class="charger-live-metric charger-connectivity-metric">
+              <span class="charger-live-metric-label">Charging status</span>
+              <div id="topbarChargerStatusCluster" class="topbar-charger-status-cluster" hidden>
+                <span id="topbarConnectivityPill" class="topbar-status-minimal-pill is-online" title="Charger Connectivity Status">
+                  <span class="status-dot"></span>
+                  <span class="status-text" id="topbarConnectivityText">Online</span>
+                </span>
+                <span id="topbarConnectorPill" class="topbar-status-minimal-pill tone-available" title="Connector 1 Status">
+                  <span class="status-dot" id="topbarConnectorDot"></span>
+                  <span class="status-text" id="topbarConnectorText">Connector 1: Available</span>
+                </span>
               </div>
-              <button type="button" id="refreshData" class="refresh-data" title="Refresh charger telemetry">
-                <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2"><path d="M21.5 2v6h-6M21.34 15.57a10 10 0 1 1-.57-8.38l5.67-5.67"/></svg>
-                <span>Refresh</span>
-              </button>
+            </div>
+            <div class="charger-live-metric charger-session-metric">
+              <span class="charger-live-metric-label">Session status</span>
+              <div class="token-status-controls">
+                <div id="tokenLed" class="token-state" role="status" aria-label="Token status">
+                  <span class="token-state-dot" aria-hidden="true"></span>
+                  <span id="tokenStatusText">Missing</span>
+                </div>
+                <button type="button" id="refreshData" class="refresh-data" title="Refresh charger telemetry" aria-label="Refresh charger telemetry">
+                  <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2"><path d="M21.5 2v6h-6M21.34 15.57a10 10 0 1 1-.57-8.38l5.67-5.67"/></svg>
+                  <span>Refresh</span>
+                </button>
+              </div>
+            </div>
+            <div class="charger-live-metric charger-freshness-metric">
+              <span class="charger-live-metric-label">Data sync and charger report</span>
               <span id="freshnessIndicator" class="freshness-indicator" role="status" aria-live="polite"></span>
             </div>
           </div>
@@ -1734,12 +1763,8 @@
         </div>
       </aside>
 
-      <p class="designer-note">
-        <svg class="inline-toyota-emblem" viewBox="74.7 74.7 224 224" width="13" height="13" fill="currentColor" aria-hidden="true">
-          <path d="M224,137.8c-10.4-3.3-23.3-5.3-37.4-5.3c-14,0-27,2-37.4,5.3c-27.6,8.9-46.6,27.3-46.6,48.7 c0,30,37.6,54.3,84,54.3c46.4,0,84-24.3,84-54.3C270.7,165.2,251.7,146.7,224,137.8 M186.7,217.5c-6.9,0-12.6-13.6-12.9-30.7c4.2,0.4,8.5,0.6,12.9,0.6c4.4,0,8.7-0.2,12.9-0.6C199.2,203.9,193.6,217.5,186.7,217.5 M174.6,173.4c1.9-12,6.6-20.5,12-20.5c5.5,0,10.1,8.5,12,20.5c-3.8,0.3-7.9,0.5-12,0.5C182.5,173.9,178.5,173.7,174.6,173.4 M206.1,172.5c-2.8-18.8-10.4-32.4-19.4-32.4c-9,0-16.6,13.5-19.4,32.4c-17.1-2.7-29-8.7-29-15.8c0-9.5,21.7-17.2,48.4-17.2c26.7,0,48.4,7.7,48.4,17.2 C235,163.7,223.1,169.8,206.1,172.5 M114.9,184.5c0-9.2,3.5-17.8,9.7-25.2c-0.1,0.5-0.1,1-0.1,1.6c0,11.6,17.4,21.4,41.6,25 c0,0.9,0,1.8,0,2.6c0,21.5,6,39.7,14.2,46C143.7,232.3,114.9,210.7,114.9,184.5 M193,234.5c8.2-6.3,14.2-24.5,14.2-46c0-0.9,0-1.8,0-2.6c24.2-3.6,41.6-13.5,41.6-25c0-0.5,0-1-0.1-1.6c6.2,7.4,9.7,16,9.7,25.2C258.4,210.7,229.6,232.3,193,234.5"/>
-        </svg>
-        <span>Toyota Motor Europe · Designed by Sagiad Madadian | 2026</span>
-      </p>
       </div>
       <router-outlet />
+      <div id="sidebarSupportPopoverLayer" class="sidebar-support-popover-layer" aria-live="off"></div>
+      </div>
     </div>
